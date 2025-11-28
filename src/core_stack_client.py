@@ -1,4 +1,3 @@
-# core_stack_client module
 """
 CoRE Stack API Client
 Handles authentication and data fetching from CoRE Stack APIs
@@ -36,8 +35,14 @@ class CoreStackClient:
         Returns:
             Dictionary containing states, districts, and tehsils with data
         """
-        # TODO: Implement API call
-        pass
+        endpoint = f"{self.base_url}/v1/locations/active"
+        try:
+            response = requests.get(endpoint, headers=self.headers)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching active locations: {e}")
+            return {}
     
     def fetch_lulc_data(self, state: str, district: str, tehsil: str, 
                         year: int) -> Dict:
@@ -53,5 +58,36 @@ class CoreStackClient:
         Returns:
             LULC raster data
         """
-        # TODO: Implement API call
-        pass
+        endpoint = f"{self.base_url}/v1/lulc/{state}/{district}/{tehsil}"
+        params = {"year": year}
+        
+        try:
+            response = requests.get(endpoint, headers=self.headers, params=params)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching LULC data: {e}")
+            return {}
+    
+    def fetch_micro_watersheds(self, state: str, district: str, 
+                              tehsil: str) -> Dict:
+        """
+        Fetch micro-watershed boundaries for a location
+        
+        Args:
+            state: State name
+            district: District name
+            tehsil: Tehsil name
+            
+        Returns:
+            Micro-watershed boundary data
+        """
+        endpoint = f"{self.base_url}/v1/boundaries/mws/{state}/{district}/{tehsil}"
+        
+        try:
+            response = requests.get(endpoint, headers=self.headers)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching micro-watersheds: {e}")
+            return {}
