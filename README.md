@@ -120,30 +120,30 @@ The analysis follows these steps:
 5. **Vectorization** - Convert raster to polygon features
 6. **Validation** - Cross-check with reference data
 
-##  Target Areas
+## 🎯 Target Areas
 
 Focusing on forest-rich regions with available CoRE Stack data:
 - Jharkhand (Ranchi, Lohardaga districts)
 - Odisha (Mayurbhanj, Keonjhar districts)
 - Maharashtra (Gadchiroli, Chandrapur districts)
 
-##  Contributing
+## 🤝 Contributing
 
 This is a competition submission, but feedback and suggestions are welcome! 
 - Open an issue for bugs or suggestions
 - Check the [CoRE Stack Innovation Challenge](https://core-stack.org/core-stack-innovation-challenge-1st-edition/) for details
 
-##  License
+## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-##  Acknowledgments
+## 🙏 Acknowledgments
 
 - **CoRE Stack Team** for providing the data infrastructure
 - **C4GT** for Issue #228 assignment
 - Built using [CoRE Stack APIs](https://api-doc.core-stack.org/)
 
-##  Contact
+## 📞 Contact
 
 - GitHub: [@dipak0000812](https://github.com/dipak0000812)
 - Project Link: [forest-connectivity-analysis](https://github.com/dipak0000812/forest-connectivity-analysis)
