@@ -4,135 +4,160 @@ Core algorithms for computing structural connectivity
 """
 
 import numpy as np
-from scipy import ndimage
 from scipy.ndimage import distance_transform_edt
-from skimage.morphology import label
-from typing import Tuple, Dict, Optional
-
+from typing import List, Dict, Optional, Tuple
 
 class ConnectivityAnalyzer:
-    """Analyzes forest structural connectivity from LULC data"""
+    """Analyze forest structural connectivity"""
     
-    def __init__(self, resolution: int = 30, core_threshold: float = 300):
+    def __init__(
+        self, 
+        resolution: int = 30,
+        core_threshold: float = 300.0,
+        edge_threshold: float = 100.0
+    ):
         """
-        Initialize connectivity analyzer
-        
         Args:
-            resolution: Spatial resolution in meters (default: 30m)
-            core_threshold: Distance threshold for core forest in meters (default: 300m)
+            resolution: Pixel size in meters (CoRE Stack = 30m)
+            core_threshold: Distance for core forest (meters)
+            edge_threshold: Distance for edge forest (meters)
         """
         self.resolution = resolution
         self.core_threshold = core_threshold
-        self.edge_threshold = 100  # Distance for edge classification
-    
-    def extract_forest_mask(self, lulc_array: np.ndarray, 
-                           forest_classes: Optional[list] = None) -> np.ndarray:
+        self.edge_threshold = edge_threshold
+        
+    def extract_forest_mask(
+        self,
+        lulc_array: np.ndarray,
+        forest_classes: List[int]
+    ) -> np.ndarray:
         """
-        Extract binary forest mask from LULC classification
+        Extract forest pixels from LULC.
         
         Args:
-            lulc_array: LULC classification array
-            forest_classes: List of LULC class values that represent forest
-                          (default: [3, 4] - adjust based on CoRE Stack classes)
+            lulc_array: 2D array from CoRE Stack
+            forest_classes: Which values = forest (e.g., [3, 4])
             
         Returns:
-            Binary mask where 1=forest, 0=non-forest
+            Binary mask (1=forest, 0=other)
         """
-        if forest_classes is None:
-            # Default forest classes - adjust based on actual CoRE Stack LULC
-            forest_classes = [3, 4]  # Placeholder values
+        mask = np.isin(lulc_array, forest_classes).astype(np.uint8)
+        return mask
         
-        forest_mask = np.isin(lulc_array, forest_classes).astype(np.uint8)
-        return forest_mask
-    
-    def compute_distance_from_edge(self, forest_mask: np.ndarray) -> np.ndarray:
+    def compute_distance_from_edge(
+        self,
+        forest_mask: np.ndarray
+    ) -> np.ndarray:
         """
-        Compute Euclidean distance from forest edge for each pixel
+        Calculate distance from forest edge for each pixel.
+        Uses scipy.ndimage.distance_transform_edt
         
         Args:
             forest_mask: Binary forest mask (1=forest, 0=non-forest)
-            
+
         Returns:
-            Distance array in meters
+            Distance in meters
         """
-        # Compute distance transform (in pixels)
+        # distance_transform_edt calculates distance to the nearest ZERO (background)
+        # So we use the forest mask directly: non-forest is 0. 
+        # Pixels inside forest (1) will have distance to nearest non-forest (0).
         distance_pixels = distance_transform_edt(forest_mask)
-        
-        # Convert to meters
         distance_meters = distance_pixels * self.resolution
-        
         return distance_meters
-    
-    def classify_connectivity(self, distance_array: np.ndarray) -> np.ndarray:
+        
+    def classify_connectivity(
+        self,
+        distance_array: np.ndarray
+    ) -> np.ndarray:
         """
-        Classify pixels into core/edge/fragmented based on distance from edge
+        Classify based on distance thresholds.
         
         Args:
-            distance_array: Distance from edge array (in meters)
-            
+            distance_array: Array of distances in meters
+
         Returns:
-            Connectivity class array:
-                0 = Non-forest
-                1 = Fragmented forest
-                2 = Edge forest
-                3 = Core forest
+            Classification:
+            0 = Non-forest
+            1 = Fragmented (< edge_threshold)
+            2 = Edge (edge_threshold to core_threshold)
+            3 = Core (> core_threshold)
         """
-        connectivity_classes = np.zeros_like(distance_array, dtype=np.uint8)
+        output = np.zeros_like(distance_array, dtype=np.uint8)
         
-        # Classify based on distance thresholds
-        connectivity_classes[distance_array > 0] = 1  # Any forest = fragmented
-        connectivity_classes[distance_array >= self.edge_threshold] = 2  # Edge forest
-        connectivity_classes[distance_array >= self.core_threshold] = 3  # Core forest
+        # Forest pixels have distance > 0
+        is_forest = distance_array > 0
         
-        return connectivity_classes
-    
-    def analyze_patches(self, forest_mask: np.ndarray) -> Tuple[np.ndarray, Dict]:
+        # 1. Fragmented / Inner Edge: < Edge threshold
+        # Actually, let's follow the standard:
+        # Edge forest is often defined as forest within X meters of non-forest.
+        # Core forest is forest > X meters from non-forest.
+        # The user spec says:
+        # 1 = Fragmented (< edge_threshold)
+        # 2 = Edge (edge_threshold to core_threshold)
+        # 3 = Core (> core_threshold)
+        
+        output[is_forest & (distance_array < self.edge_threshold)] = 1
+        output[(distance_array >= self.edge_threshold) & (distance_array < self.core_threshold)] = 2
+        output[distance_array >= self.core_threshold] = 3
+        
+        return output
+        
+    def calculate_statistics(
+        self,
+        connectivity_array: np.ndarray
+    ) -> Dict[str, float]:
         """
-        Identify and analyze individual forest patches
+        Calculate area statistics.
         
         Args:
-            forest_mask: Binary forest mask
-            
+            connectivity_array: Classified array (0, 1, 2, 3)
+
         Returns:
-            Tuple of (labeled_patches, patch_statistics)
+            Dictionary with area stats in hectares and indices
         """
-        # Label connected components
-        labeled_patches, num_patches = label(forest_mask, connectivity=2, return_num=True)
+        # Pixel area in hectares
+        pixel_area_ha = (self.resolution ** 2) / 10000.0
         
-        # Calculate statistics for each patch
-        patch_stats = {}
-        for patch_id in range(1, num_patches + 1):
-            patch_pixels = (labeled_patches == patch_id)
-            area_pixels = np.sum(patch_pixels)
-            area_hectares = (area_pixels * self.resolution * self.resolution) / 10000
-            
-            patch_stats[patch_id] = {
-                'area_ha': area_hectares,
-                'num_pixels': area_pixels
-            }
+        fragmented_pixels = np.sum(connectivity_array == 1)
+        edge_pixels = np.sum(connectivity_array == 2)
+        core_pixels = np.sum(connectivity_array == 3)
+        total_forest_pixels = fragmented_pixels + edge_pixels + core_pixels
         
-        return labeled_patches, patch_stats
+        stats = {
+            'core_area_ha': float(core_pixels * pixel_area_ha),
+            'edge_area_ha': float(edge_pixels * pixel_area_ha),
+            'fragmented_area_ha': float(fragmented_pixels * pixel_area_ha),
+            'total_forest_ha': float(total_forest_pixels * pixel_area_ha)
+        }
+        
+        # Fragmentation Index (0-1)
+        # A simple metric: 1 - (Core Area / Total Forest Area)
+        # 0 = All Core (Low Fragmentation), 1 = No Core (High Fragmentation)
+        if stats['total_forest_ha'] > 0:
+            stats['fragmentation_index'] = 1.0 - (stats['core_area_ha'] / stats['total_forest_ha'])
+        else:
+             stats['fragmentation_index'] = 0.0
+             
+        return stats
+
+if __name__ == "__main__":
+    # Simple verification with synthetic data
+    print("Verifying ConnectivityAnalyzer logic...")
+    analyzer = ConnectivityAnalyzer(resolution=30)
     
-    def compute_fragmentation_index(self, forest_mask: np.ndarray) -> float:
-        """
-        Compute overall fragmentation index for the landscape
-        
-        Args:
-            forest_mask: Binary forest mask
-            
-        Returns:
-            Fragmentation index (0-1, higher = more fragmented)
-        """
-        labeled_patches, num_patches = label(forest_mask, connectivity=2, return_num=True)
-        
-        if num_patches == 0:
-            return 0.0
-        
-        total_forest_pixels = np.sum(forest_mask)
-        if total_forest_pixels == 0:
-            return 0.0
-        
-        # Simple fragmentation metric: number of patches relative to forest area
-        fragmentation = min(1.0, num_patches / (total_forest_pixels ** 0.5))
-        
-        return fragmentation
+    # Create synthetic 10x10 mask with a 4x4 block of forest in center
+    mask = np.zeros((10, 10), dtype=np.uint8)
+    mask[3:7, 3:7] = 1 
+    
+    # Distances for center pixel (5,5) should be roughly:
+    # It is at index 5. Edges are at index 2 (from low side 3) and 7 (from high side 6).
+    # Distance to nearest 0 (at index 2 or 7) is ... wait.
+    # Pixels at 3,3 are border. Adjacent to 2,3 (0). Sqrt(1) distance.
+    
+    dists = analyzer.compute_distance_from_edge(mask)
+    classes = analyzer.classify_connectivity(dists)
+    stats = analyzer.calculate_statistics(classes)
+    
+    print(f"Max distance: {dists.max():.2f}m")
+    print(f"Stats: {stats}")
+    print("Verification complete.")
