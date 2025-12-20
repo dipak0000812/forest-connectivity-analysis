@@ -9,12 +9,6 @@
 
 This project addresses **Issue #228** from the [CoRE Stack Innovation Challenge](https://core-stack.org/core-stack-innovation-challenge-1st-edition/). It computes forest structural connectivity at 30m resolution to help identify degradation patterns.
 
-**Key Features:**
-*   **Local Processing**: Fully local workflow using Python's scientific stack (NumPy, SciPy, Rasterio).
-*   **CoRE Stack Integration**: Direct API integration for fetching pre-processed LULC data.
-*   **Connectivity Metrics**: Classifies forests into **Core**, **Edge**, and **Fragmented** zones.
-*   **Vectorization**: Converts analysis results into vector polygons for integration with watershed boundaries.
-
 ## 🛠️ Installation
 
 ### Prerequisites
@@ -40,34 +34,7 @@ This project addresses **Issue #228** from the [CoRE Stack Innovation Challenge]
     CORE_STACK_API_KEY=your_actual_api_key_here
     ```
 
-4.  **Verify Setup:**
-    Run the diagnostic script:
-    ```bash
-    python check_env.py
-    ```
-
 ## 📖 Usage
-
-### Quick Start (Python)
-```python
-from src.core_stack_client import CoreStackClient
-from src.connectivity import ConnectivityAnalyzer
-from src.visualization import plot_connectivity_map
-
-# 1. Fetch Data
-client = CoreStackClient() # Loads key from .env
-lulc = client.fetch_lulc_raster("Jharkhand", "Ranchi", "Bundu", 2023)
-
-# 2. Analyze
-analyzer = ConnectivityAnalyzer(resolution=30)
-forest_mask = analyzer.extract_forest_mask(lulc, forest_classes=[3, 4])
-dists = analyzer.compute_distance_from_edge(forest_mask)
-connectivity = analyzer.classify_connectivity(dists)
-
-# 3. Visualize
-fig = plot_connectivity_map(connectivity, transform=None)
-fig.savefig("outputs/connectivity_map.png")
-```
 
 ### Running Notebooks
 Start the Jupyter Notebook server:
@@ -76,8 +43,9 @@ jupyter notebook
 ```
 Navigate to `notebooks/` and run:
 *   `00_setup_and_config.ipynb`: Test your environment and API connection.
-*   `01_data_exploration.ipynb`: Explore the raw LULC data.
-*   **`02_connectivity_analysis.ipynb`**: The main analysis pipeline.
+*   `01_data_exploration.ipynb`: Explore the raw LULC data and visualize classification.
+*   **`02_connectivity_analysis.ipynb`**: The main analysis pipeline. Downloads data, computes connectivity, and exports vectors.
+*   `04_validation.ipynb`: Validation checks and statistical summaries.
 
 ## 📁 Project Structure
 ```
@@ -92,15 +60,14 @@ forest-connectivity-analysis/
 ├── docs/                     # Detailed Docs
 │   ├── METHODOLOGY.md
 │   └── API_USAGE.md
+├── utils/                    # Helper scripts
+│   └── sample_data.py
 ├── requirements.txt
 └── README.md
 ```
 
 ## 🔬 Methodology
 See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for details on the core/edge classification algorithm.
-
-## 🤝 Contributing
-This is a competition submission, but feedback is welcome!
 
 ## 📄 License
 MIT License
