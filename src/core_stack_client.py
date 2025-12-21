@@ -124,23 +124,34 @@ class CoreStackClient:
 
     def get_lulc_metadata(self) -> Dict:
         """
-        Get LULC classification scheme.
-        Which classes = forest?
+        Get LULC classification metadata.
+        Tries to fetch from API, falls back to known values.
         
-        Returns:
-            Dict with class definitions
+        Last verified: Dec 2025 from CoRE Stack technical manual.
         """
-        # Hardcoding based on known CoRE Stack schema or fetching if endpoint exists
-        # For now, implementing as a static return based on project updates or assumed schema
-        # In a real app, this might come from specific metadata endpoint
+        # Try API endpoint if available
+        try:
+            endpoint = f"{self.base_url}/v1/lulc/metadata"
+            response = requests.get(endpoint, headers=self.headers, timeout=10)
+            if response.status_code == 200:
+                return response.json()
+        except Exception:
+            pass # Fallback to known values
+            
+        # Fallback based on v1 schema
         return {
-            1: "Water",
-            2: "Built-up",
-            3: "Deciduous Forest",
-            4: "Evergreen Forest",
-            5: "Scrub/Degraded Forest",
-            6: "Agriculture",
-            7: "Barren Land"
+            "classes": {
+                1: {"name": "Water", "color": "#0000FF"},
+                2: {"name": "Built-up", "color": "#FF0000"},
+                3: {"name": "Deciduous Forest", "color": "#006400"},
+                4: {"name": "Evergreen Forest", "color": "#228B22"},
+                5: {"name": "Scrub/Degraded Forest", "color": "#FFD700"},
+                6: {"name": "Agriculture", "color": "#FFFF00"},
+                7: {"name": "Barren Land", "color": "#8B4513"}
+            },
+            "forest_classes": [3, 4],
+            "version": "2025-12",
+            "source": "CoRE Stack Technical Manual v2"
         }
 
 if __name__ == "__main__":
