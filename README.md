@@ -4,7 +4,9 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
 ## 1. Overview
-This project provides a comprehensive solution for analyzing **forest structural connectivity** at a 30-meter resolution. Structural connectivity is a key ecological indicator that reveals forest health by distinguishing between core, edge, and fragmented areas. The solution is designed to work with **CoRE Stack** LULC data and provides both a standalone Python backend and a Google Earth Engine (GEE) compatibility layer.
+This project provides a comprehensive solution for analyzing **forest structural connectivity** at a 30-meter resolution. Structural connectivity is a key ecological indicator that reveals forest health by distinguishing between core, edge, and fragmented areas. 
+
+The analysis processes **Sentinel-2 derived Land Use/Land Cover (LULC)** data (standardized to 30m) from the CoRE Stack API. It provides both a standalone Python backend and a Google Earth Engine (GEE) compatibility layer.
 
 ## 2. Problem Statement (Issue #228)
 **Context:** Deforestation is often detected too late. Identifying degradation patterns (fragmentation) within forest boundaries is crucial for early intervention.

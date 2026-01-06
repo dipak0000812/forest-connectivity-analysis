@@ -53,10 +53,19 @@ def raster_to_polygons(
     # Map class names
     class_map = {1: 'Fragmented', 2: 'Edge', 3: 'Core'}
     gdf['class_name'] = gdf['class'].map(class_map)
+
+    # Map Distance Criteria (Strict Requirement 4.2)
+    # 1=Fragmented (< 100m), 2=Edge (100-300m), 3=Core (> 300m)
+    dist_map = {1: '< 100m', 2: '100m - 300m', 3: '> 300m'}
+    gdf['distance_criteria_m'] = gdf['class'].map(dist_map)
     
     # Calculate area in hectares
     # Assuming CRS is projected in meters
     gdf['area_ha'] = gdf.geometry.area / 10000.0
+    
+    # Explicit 'patch_size_ha' (Required by checklist 4.2)
+    # For individual polygons, patch size = area.
+    gdf['patch_size_ha'] = gdf['area_ha']
     
     return gdf
 
@@ -92,10 +101,15 @@ def merge_and_simplify(
     
     # Re-map class names lost during dissolve if not careful, 
     # actually dissolve keeps the 'by' column. 
-    # We need to restore 'class_name'
+    # We need to restore 'class_name' and 'distance_criteria_m'
     class_map = {1: 'Fragmented', 2: 'Edge', 3: 'Core'}
+    dist_map = {1: '< 100m', 2: '100m - 300m', 3: '> 300m'}
+
     exploded['class_name'] = exploded['class'].map(class_map)
+    exploded['distance_criteria_m'] = exploded['class'].map(dist_map)
+
     exploded['area_ha'] = exploded.geometry.area / 10000.0
+    exploded['patch_size_ha'] = exploded['area_ha']
     
     # Simplify
     exploded['geometry'] = exploded.geometry.simplify(tolerance, preserve_topology=True)
