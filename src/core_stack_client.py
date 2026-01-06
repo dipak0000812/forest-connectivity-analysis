@@ -9,7 +9,8 @@ import rasterio
 import numpy as np
 import geopandas as gpd
 from io import BytesIO
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Tuple
+import tempfile
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -57,9 +58,10 @@ class CoreStackClient:
         district: str, 
         tehsil: str, 
         year: int
-    ) -> Union[np.ndarray, None]:
+    ) -> Tuple[Optional[np.ndarray], Optional[Dict]]:
         """
         Download LULC raster for location.
+        Streams to temporary file to avoid memory issues.
         
         Args:
             state: State name
@@ -68,26 +70,39 @@ class CoreStackClient:
             year: Year of data
             
         Returns:
-            numpy array with LULC classifications or None if failed
+            Tuple (numpy array, profile_dict) or (None, None)
         """
         endpoint = f"{self.base_url}/v1/lulc/{state}/{district}/{tehsil}"
         params = {"year": year}
         
         try:
-            # Note: In a real scenario, this might return a URL to a TIFF or binary content.
-            # Assuming binary GeoTIFF content for this implementation as per typical patterns.
-            response = requests.get(endpoint, headers=self.headers, params=params)
-            response.raise_for_status()
+            # Stream response to handle large files safely
+            with requests.get(endpoint, headers=self.headers, params=params, stream=True) as response:
+                response.raise_for_status()
+                
+                # Use tempfile to store raster on disk
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.tif') as tmp:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        tmp.write(chunk)
+                    tmp_path = tmp.name
             
-            with rasterio.open(BytesIO(response.content)) as src:
-                return src.read(1) # Read first band
+            # Read from disk
+            try:
+                with rasterio.open(tmp_path) as src:
+                    array = src.read(1)
+                    profile = src.profile.copy()
+                    return array, profile
+            finally:
+                # Cleanup temp file
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
                 
         except requests.exceptions.RequestException as e:
             print(f"Error fetching LULC data: {e}")
-            return None
+            return None, None
         except Exception as e:
             print(f"Error reading raster data: {e}")
-            return None
+            return None, None
 
     def fetch_micro_watershed_boundaries(
         self,

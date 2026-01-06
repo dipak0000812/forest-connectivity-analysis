@@ -26,6 +26,32 @@ class ConnectivityAnalyzer:
         self.core_threshold = core_threshold
         self.edge_threshold = edge_threshold
         
+    def validate_geospatial_profile(self, profile: Dict) -> None:
+        """
+        Enforce geospatial invariants.
+        Raises ValueError if validation fails.
+        """
+        if not profile:
+            raise ValueError("Missing geospatial profile")
+            
+        # 1. Check CRS is projected
+        crs = profile.get('crs')
+        if not crs or not crs.is_projected:
+            raise ValueError(f"CRS must be projected (meters), got: {crs}")
+            
+        # 2. Check Resolution (approx 30m)
+        transform = profile.get('transform')
+        if transform:
+            # transform[0] is pixel width (usually positive), transform[4] is pixel height (usually negative)
+            res_x = abs(transform[0])
+            res_y = abs(transform[4])
+            
+            # Allow small float tolerance, but strictly enforce ~30m
+            if not (28.0 <= res_x <= 32.0) or not (28.0 <= res_y <= 32.0):
+                raise ValueError(f"Resolution mismatch. Expected ~30m, got {res_x}x{res_y}m. This algorithm is calibrated for 30m.")
+        else:
+            raise ValueError("Resulting transform is missing.")
+        
     def extract_forest_mask(
         self,
         lulc_array: np.ndarray,
