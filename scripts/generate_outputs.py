@@ -39,33 +39,26 @@ def main():
     # 2. Fetch Data
     print("Fetching LULC data...")
     client = CoreStackClient()
-    lulc_array = client.fetch_lulc_raster(STATE, DISTRICT, TEHSIL, YEAR)
+    lulc_array, profile = client.fetch_lulc_raster(STATE, DISTRICT, TEHSIL, YEAR)
     
-    if lulc_array is None:
-        print("Failed to fetch LULC data. Constructing synthetic data for demonstration.")
-        import numpy as np
-        lulc_array = np.zeros((100, 100), dtype=np.uint8)
-        # Add a forest block
-        lulc_array[30:70, 30:70] = 3 # Core
-        lulc_array[20:80, 45:55] = 4 # Bridge
-        
-        # Synthetic transform
-        from rasterio.transform import from_origin
-        transform = from_origin(350000, 2500000, 30, 30) # UTM-ish
-        crs = "EPSG:32643"
-    else:
-        # In real scenario we'd get transform/crs from the fetched raster source
-        # For this script assuming we have them or mocking them if fetch returns raw array
-        # The client.fetch_lulc_raster returns just array in current impl.
-        # We need to improve client to return profile or handle synthetic.
-        print("Warning: Client returned array without profile. Using synthetic georeferencing.")
-        from rasterio.transform import from_origin
-        transform = from_origin(350000, 2500000, 30, 30)
-        crs = "EPSG:32643"
+    if lulc_array is None or profile is None:
+        print("CRITICAL ERROR: Failed to fetch valid LULC data or profile.")
+        sys.exit(1)
+
+    crs = profile['crs']
+    transform = profile['transform']
 
     # 3. Analyze Connectivity
     print("Running Connectivity Analysis...")
     analyzer = ConnectivityAnalyzer(resolution=30)
+    
+    # Validation (Fail Fast)
+    try:
+        analyzer.validate_geospatial_profile(profile)
+        print("Geospatial validation passed (CRS Projected, Resolution ~30m).")
+    except ValueError as e:
+        print(f"GEOSPATIAL INTEGRITY FAILURE: {e}")
+        sys.exit(1)
     
     # Mask
     forest_mask = analyzer.extract_forest_mask(lulc_array, [3, 4])
@@ -83,16 +76,16 @@ def main():
     # 4. Export Raster
     print("Exporting Raster...")
     raster_path = output_dir / "connectivity.tif"
-    with rasterio.open(
-        raster_path, 'w',
-        driver='GTiff',
-        height=connectivity_classes.shape[0],
-        width=connectivity_classes.shape[1],
-        count=1,
-        dtype=connectivity_classes.dtype,
-        crs=crs,
-        transform=transform
-    ) as dst:
+    
+    # Update profile for output
+    out_profile = profile.copy()
+    out_profile.update({
+        'driver': 'GTiff',
+        'dtype': connectivity_classes.dtype,
+        'count': 1
+    })
+    
+    with rasterio.open(raster_path, 'w', **out_profile) as dst:
         dst.write(connectivity_classes, 1)
         
     # 5. Vectorize & Export
