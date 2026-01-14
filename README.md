@@ -13,19 +13,6 @@ The system is designed to **fail fast and explicitly** if required inputs (valid
 
 ---
 
-## Problem Statement (Issue #228)
-
-### Context
-
-Deforestation and forest degradation are often detected too late. Identifying fragmentation patterns—particularly loss of core forest—is critical for early intervention and conservation planning.
-
-### Challenge
-
-Compute field-level (30 m) forest structural connectivity metrics to:
-
-- Identify **Core Forest** (deep, undisturbed areas)
-- Identify **Edge Forest** (peripheral transition zones)
-- Identify **Fragmented Forest** (isolated or degraded patches)
 - Publish results as **Raster** and **Vector** assets
 - Enable integration with **Area of Interest (AoI)** and **Micro-Watershed (MWS)** boundaries
 
