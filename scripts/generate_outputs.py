@@ -60,8 +60,13 @@ def main():
         print(f"GEOSPATIAL INTEGRITY FAILURE: {e}")
         sys.exit(1)
     
+    # Fetch Metadata for Correct Forest Semantics (Requirement 1 & 2)
+    metadata = client.get_lulc_metadata()
+    natural_forest_ids = metadata.get("natural_forest_classes", [3, 4])
+    print(f"Using Natural Forest Classes: {natural_forest_ids}")
+    
     # Mask
-    forest_mask = analyzer.extract_forest_mask(lulc_array, [3, 4])
+    forest_mask = analyzer.extract_forest_mask(lulc_array, natural_forest_ids)
     
     # Distance
     distance_map = analyzer.compute_distance_from_edge(forest_mask)

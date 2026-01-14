@@ -29,7 +29,8 @@ class CoreStackClient:
         if not self.api_key:
             raise ValueError("API Key is required. Set CORE_STACK_API_KEY env var or pass explicitly.")
             
-        self.base_url = "https://api.core-stack.org"
+        # Allow overriding base URL from env (default to production)
+        self.base_url = os.getenv("CORE_STACK_API_URL", "https://api.core-stack.org")
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -163,8 +164,12 @@ class CoreStackClient:
                 5: {"name": "Scrub/Degraded Forest", "color": "#FFD700"},
                 6: {"name": "Agriculture", "color": "#FFFF00"},
                 7: {"name": "Barren Land", "color": "#8B4513"}
+                # Note: Plantation class (e.g. 8) if present should be listed here
             },
-            "forest_classes": [3, 4],
+            # STRICT SEMANTICS: Only natural forest should be analyzed for connectivity.
+            # Plantations are excluded by design.
+            "natural_forest_classes": [3, 4], 
+            "plantation_classes": [], # Explicitly empty/excluded by default
             "version": "2025-12",
             "source": "CoRE Stack Technical Manual v2"
         }
