@@ -37,9 +37,27 @@ def main():
     print(f"Outputs will be saved to: {output_dir}")
     
     # 2. Fetch Data
-    print("Fetching LULC data...")
-    client = CoreStackClient()
-    lulc_array, profile = client.fetch_lulc_raster(STATE, DISTRICT, TEHSIL, YEAR)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--demo', action='store_true', help='Use local demo data instead of API')
+    args = parser.parse_args()
+
+    if args.demo:
+        print("DEMO MODE: Loading local sample data...")
+        # Initialize client with dummy key for metadata fallback
+        client = CoreStackClient(api_key="demo-key")
+        
+        demo_path = Path("data/demo_lulc.tif")
+        if not demo_path.exists():
+            print("ERROR: Demo data not found. Run 'python scripts/create_demo_data.py' first.")
+            sys.exit(1)
+        with rasterio.open(demo_path) as src:
+            lulc_array = src.read(1)
+            profile = src.profile
+    else:
+        print("Fetching LULC data from API...")
+        client = CoreStackClient()
+        lulc_array, profile = client.fetch_lulc_raster(STATE, DISTRICT, TEHSIL, YEAR)
     
     if lulc_array is None or profile is None:
         print("CRITICAL ERROR: Failed to fetch valid LULC data or profile.")
@@ -113,7 +131,7 @@ def main():
             "timestamp": timestamp,
             "location": f"{STATE}/{DISTRICT}/{TEHSIL}",
             "resolution": 30,
-            "crs": crs
+            "crs": str(crs) if crs else "Unknown"
         },
         "statistics": stats,
         "parameters": {
