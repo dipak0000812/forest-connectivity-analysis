@@ -38,6 +38,46 @@ This project follows a **dual-engine architecture**:
 
 ---
 
+## Methodological Transition
+
+### Current Implementation Status
+
+The current system implements a **distance-based connectivity classification** that provides a coarse approximation of forest structural patterns. This baseline approach:
+
+- Computes Euclidean distance from forest edges
+- Classifies pixels into Core (>300m), Edge (100-300m), and Fragmented (<100m)
+- Serves as a validated reference for structural connectivity analysis
+
+### Relationship to MSPA
+
+**What is MSPA?**  
+Morphological Spatial Pattern Analysis (MSPA) is a comprehensive framework for classifying forest patches into seven geometric pattern classes: Core, Islet, Perforation, Edge, Loop, Bridge, and Branch.
+
+**Current vs. Full MSPA:**
+
+| Aspect | Current Implementation | Full MSPA |
+|--------|------------------------|-----------|
+| **Pattern Classes** | 3 (Core, Edge, Fragmented) | 7 (Core, Islet, Perforation, Edge, Loop, Bridge, Branch) |
+| **Methodology** | Distance-to-edge thresholding | Morphological image processing with foreground/background analysis |
+| **Connectivity** | Implicit (distance-based proxy) | Explicit (structural role identification) |
+| **Use Case** | Coarse fragmentation assessment | Detailed connectivity pathway analysis |
+
+**Why This Matters:**  
+The current implementation captures the most critical metric—**Core forest area**—which is essential for conservation prioritization. However, it does not distinguish between the geometric roles of non-core pixels (e.g., "Bridge" vs "Loop" vs "Branch"), which are relevant for corridor planning and fine-grained connectivity mapping.
+
+### Roadmap
+
+Based on maintainer feedback and CoRE Stack alignment goals:
+
+1. **Phase 1 (Current)**: Distance-based Core/Edge/Fragmented classification
+2. **Phase 2 (Planned)**: Full MSPA implementation with 7-class pattern recognition
+3. **Phase 3 (Future)**: GEE-first deployment with CoRE Stack integration
+
+**Important Note:**  
+The "Fragmented" class in the current implementation is **not equivalent** to MSPA's "Islet" class. It represents **all non-core, non-edge forest**, which may include functional connectivity elements like bridges and branches. This will be refined in the full MSPA transition.
+
+---
+
 ## Methodology
 
 The analysis follows a **Morphological Spatial Pattern Analysis (MSPA)** approach:
