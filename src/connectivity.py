@@ -84,10 +84,17 @@ class ConnectivityAnalyzer:
         Returns:
             Distance in meters
         """
-        # distance_transform_edt calculates distance to the nearest ZERO (background)
-        # So we use the forest mask directly: non-forest is 0. 
-        # Pixels inside forest (1) will have distance to nearest non-forest (0).
-        distance_pixels = distance_transform_edt(forest_mask)
+        # Pad the mask with 0s (non-forest) so that image boundaries 
+        # are treated as edges.
+        # pad_width=1 adds one pixel of 0s around the entire array.
+        padded_mask = np.pad(forest_mask, pad_width=1, mode='constant', constant_values=0)
+        
+        # Compute distance on padded array
+        distance_padded = distance_transform_edt(padded_mask)
+        
+        # Crop back to original size
+        distance_pixels = distance_padded[1:-1, 1:-1]
+        
         distance_meters = distance_pixels * self.resolution
         return distance_meters
         
@@ -96,7 +103,10 @@ class ConnectivityAnalyzer:
         distance_array: np.ndarray
     ) -> np.ndarray:
         """
-        Classify based on distance thresholds.
+        DISTANCE-BASED CLASSIFICATION (Not Full MSPA)
+        
+        This is a simplified structural proxy using distance thresholds only.
+        It does NOT implement full MSPA (Bridge, Loop, Branch, Islet classes).
         
         Args:
             distance_array: Array of distances in meters
@@ -104,22 +114,23 @@ class ConnectivityAnalyzer:
         Returns:
             Classification:
             0 = Non-forest
-            1 = Fragmented (< edge_threshold)
-            2 = Edge (edge_threshold to core_threshold)
+            1 = Near-Edge Zone (< edge_threshold) [DEPRECATED: was "Fragmented"]
+            2 = Transition Zone (edge_threshold to core_threshold)
             3 = Core (> core_threshold)
+            
+        Note: Class 1 will be replaced with proper MSPA classes (Islet, Bridge,
+              Branch, Loop, Perforation) in the next major version.
         """
         output = np.zeros_like(distance_array, dtype=np.uint8)
         
         # Forest pixels have distance > 0
         is_forest = distance_array > 0
         
-        # 1. Fragmented / Inner Edge: < Edge threshold
-        # Actually, let's follow the standard:
-        # Edge forest is often defined as forest within X meters of non-forest.
-        # Core forest is forest > X meters from non-forest.
-        # The user spec says:
-        # 1 = Fragmented (< edge_threshold)
-        # 2 = Edge (edge_threshold to core_threshold)
+        # DISTANCE-BASED CLASSIFICATION (Interim/Deprecated)
+        # This simple approach will be replaced with full MSPA.
+        # Current classes:
+        # 1 = Near-Edge Zone (< edge_threshold) - TO BE REPLACED
+        # 2 = Transition Zone (edge_threshold to core_threshold)
         # 3 = Core (> core_threshold)
         
         output[is_forest & (distance_array < self.edge_threshold)] = 1
