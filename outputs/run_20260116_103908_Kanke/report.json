@@ -1,0 +1,19 @@
+{
+  "meta": {
+    "timestamp": "20260116_103908",
+    "location": "Jharkhand/Ranchi/Kanke",
+    "resolution": 30,
+    "crs": "EPSG:32643"
+  },
+  "statistics": {
+    "core_area_ha": 120.96,
+    "edge_area_ha": 92.88,
+    "fragmented_area_ha": 58.41,
+    "total_forest_ha": 272.25,
+    "fragmentation_index": 0.555702479338843
+  },
+  "parameters": {
+    "core_threshold": 300,
+    "edge_threshold": 100
+  }
+}

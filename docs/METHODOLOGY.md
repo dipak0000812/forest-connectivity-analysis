@@ -1,131 +1,113 @@
-# Methodology: Forest Structural Connectivity
+# Methodology: MSPA Forest Structural Connectivity
+
+> **Implementation Status**: GEE-first with Python for validation only.
 
 ## Overview
-This document details the algorithm used to compute forest structural connectivity at 30m resolution.
 
-## Algorithm Steps
-
-### 1. Forest Masking (Natural Forest Only)
-The analysis begins by creating a binary mask from the input Land Use/Land Cover (LULC) raster.
-*   **Input**: 30m LULC Raster (Sentinel-2 derived).
-*   **Logic**: `Mask = 1 if LULC_Value in [Natural_Forest_IDs] else 0`
-*   **Exclusions**: **Plantations** (e.g., commercial monocultures) are explicitly **excluded** from the mask. This ensures that connectivity metrics reflect the ecological integrity of natural forests, not industrial cover.
-
-### 2. Distance Transformation (Morphological Spatial Pattern Analysis)
-We compute the Euclidean distance from every forest pixel to the nearest non-forest pixel.
-*   **Tool**: `scipy.ndimage.distance_transform_edt` (Python) / `fastDistanceTransform` (GEE).
-*   **Metric**: Euclidean distance in meters.
-*   **Boundary Handling**: The AOI boundary is treated as "non-forest" (distance = 0) to avoid artificial edge effects at image borders.
-
-### 3. Classification
-Pixels are classified based on their distance from the forest edge ($d$):
-
-| Class | Name | Definition | Ecological Signifiance |
-| :--- | :--- | :--- | :--- |
-| **1** | **Fragmented** | $d < 100m$ | Degraded, edge-exposed, or small isolated patches. High disturbance risk. |
-| **2** | **Edge** | $100m \le d < 300m$ | Transition zone. Buffers the core from external disturbance. |
-| **3** | **Core** | $d \ge 300m$ | Deep, undisturbed forest. Critical for biodiversity and interior species. |
-
-### 4. Vectorization
-The raster classification is converted to vector polygons:
-*   **Method**: Connected component analysis (8-connectivity).
-*   **Simplification**: Polygons are simplified (tolerance ~10m) to reduce vertex count while preserving shape.
-*   **Attributes**:
-    *   `connectivity_class`: Core, Edge, or Fragmented.
-    *   `area_ha`: Area in hectares.
-    *   `patch_size_ha`: Size of the contiguous patch area.
-
-## Parity: Python vs GEE
-The algorithm is implemented identically in both environments:
-*   **Python**: Uses `numpy` and `scipy` for exact in-memory processing.
-*   **GEE**: Uses `ee.Image` methods to replicate the logic on the cloud.
-*   **Consistency**: Both implementations use the same thresholds (100m/300m) and the same natural forest class definitions.
+This document describes the **Morphological Spatial Pattern Analysis (MSPA)** algorithm used to classify forest structural connectivity at 30m resolution.
 
 ---
 
-## Methodological Context: Distance-Based vs Full MSPA
+## 1. Data Source
 
-### Current Implementation (Distance-Based)
+**IndiaSAT LULC** assets on CoRE Stack GEE app.
 
-**Approach**: Classify pixels based solely on Euclidean distance from forest edge.
+| Parameter | Value |
+|-----------|-------|
+| Resolution | 30m |
+| Source | Sentinel-2 derived |
+| CRS | UTM (projected) |
 
-**Decision Logic**:
-```
-if distance < 100m:
-    class = "Fragmented"
-elif distance < 300m:
-    class = "Edge"
-else:
-    class = "Core"
+---
+
+## 2. Forest Mask
+
+### Input
+IndiaSAT LULC raster with class IDs.
+
+### Logic
+```javascript
+var forestClasses = [3, 4];  // Deciduous, Evergreen
+var mask = lulc.remap(forestClasses, [1, 1], 0);
 ```
 
-**Strengths**:
-- Computationally efficient (O(n) complexity)
-- Interpretable thresholds aligned with ecological edge effect literature
-- Captures the most critical conservation metric: **Core forest area**
-
-**Limitations**:
-- Does not distinguish geometric roles (e.g., bridges vs isolated islets)
-- "Fragmented" class is a catch-all for all non-core, non-edge pixels
-- Cannot identify linear connectivity features (corridors, stepping stones)
+### Exclusions
+- **Plantations (Class 8)**: Excluded by design
+- Only **natural forest** enters the analysis
 
 ---
 
-### Full MSPA (7-Class Pattern Recognition)
+## 3. Distance Transform
 
-**Approach**: Morphological image processing with foreground/background analysis.
+### Method
+**Euclidean Distance Transform** via `fastDistanceTransform` (GEE).
 
-**Pattern Classes**:
+### Output
+Distance in meters from each forest pixel to nearest non-forest edge.
 
-| Class | Definition | Connectivity Role |
-|-------|------------|-------------------|
-| **Core** | Interior area > threshold distance from edge | Primary habitat reservoir |
-| **Islet** | Small isolated patches (too small for core) | Stepping stones, genetic exchange |
-| **Perforation** | Forest surrounding non-forest openings | Edge around internal gaps |
-| **Edge** | Forest adjacent to main non-forest matrix | Transition/buffer zone |
-| **Loop** | Forest connecting to itself | Local connectivity |
-| **Bridge** | Forest connecting two core areas | Critical corridor |
-| **Branch** | Forest extending from core but not connecting | Potential corridor |
-
-**Key Differences**:
-
-| Metric | Distance-Based | Full MSPA |
-|--------|----------------|-----------|
-| **Islet Detection** | Lumped into "Fragmented" | Explicit class |
-| **Bridge Identification** | Lumped into "Fragmented" | Explicit class (critical for corridor planning) |
-| **Perforation** | Not detected | Explicit class (important for internal fragmentation) |
-| **Computational Cost** | Low | Moderate (requires morphological operators) |
-| **Ecological Detail** | Coarse | Fine-grained |
+```javascript
+var distance = forestMask.fastDistanceTransform()
+  .sqrt()
+  .multiply(30);  // Convert pixels to meters
+```
 
 ---
 
-### Transition Plan
+## 4. MSPA Classification
 
-**Phase Approach**:
+### 7-Class System (JRC Standard)
 
-1. **Current (Baseline)**: Distance-based 3-class system validated and documented
-2. **Next (In Development)**: Full 7-class MSPA with GEE-first implementation
-3. **Future**: Integration with CoRE Stack micro-watershed analysis
+| Class | ID | Definition | Detection |
+|-------|-----|------------|-----------|
+| **Core** | 1 | Distance ≥ 100m | Distance transform |
+| **Islet** | 2 | Patch with no core | Connected components |
+| **Perforation** | 3 | Edge around internal holes | Hole detection |
+| **Edge** | 4 | Distance < 100m, external | Distance + topology |
+| **Loop** | 5 | Connects core to itself | Skeleton analysis |
+| **Bridge** | 6 | Connects 2+ cores | Skeleton + graph |
+| **Branch** | 7 | Dead-end from core | Skeleton endpoints |
 
-**Deprecation Notice**:
-
-> ⚠️ **Note on "Fragmented" Class**  
-> The current "Fragmented" class (d < 100m) will be **deprecated** in the next major version. It will be replaced with granular classifications:
-> - **Islet**: Small isolated patches
-> - **Perforation**: Internal edge around gaps
-> - **Bridge/Branch**: Linear connectivity features
->
-> This change will enable **corridor identification** and **pathway analysis**, which are not possible with the current distance-only approach.
-
-**Why the Transition Matters**:
-
-- **Current**: "This forest has 45% core area" → Useful for prioritization
-- **Full MSPA**: "Core patch A connects to patch B via 3 bridge pixels" → Enables targeted corridor restoration
+### Parameters
+- **EdgeWidth**: 100m (JRC default)
+- **Connectivity**: 8-connected
 
 ---
 
-### References
+## 5. Bridge Detection (Priority)
 
-- Vogt, P., et al. (2007). "Mapping Spatial Patterns with Morphological Image Processing." *Landscape Ecology* 22(2): 171-177.
-- Soille, P., & Vogt, P. (2009). "Morphological segmentation of binary patterns." *Pattern Recognition Letters* 30(4): 456-459.
-- Current implementation aligns with edge effect thresholds per Haddad et al. (2015), *Science Advances*.
+Bridges are **critical corridors** connecting separate core areas.
+
+### Algorithm
+1. Label each core with unique ID
+2. Extract skeleton of non-core forest
+3. For each skeleton pixel:
+   - Check adjacent core labels
+   - If touches 2+ different labels → **Bridge**
+
+---
+
+## 6. Vectorization
+
+Convert raster to polygons using `reduceToVectors()`.
+
+### Attributes
+- `mspa_class`: 1-7
+- `class_name`: Core, Bridge, etc.
+- `area_ha`: Polygon area in hectares
+
+---
+
+## 7. Validation
+
+### Method
+Compare GEE outputs against JRC MSPA Desktop Tool (GuidosToolbox).
+
+### Target
+≥95% pixel-wise agreement on test regions.
+
+---
+
+## References
+
+- Soille, P., & Vogt, P. (2009). Morphological segmentation of binary patterns. *Pattern Recognition Letters*, 30(4), 456-459.
+- JRC MSPA: https://forest.jrc.ec.europa.eu/en/activities/lpa/mspa/
