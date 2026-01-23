@@ -167,7 +167,7 @@ var CoreDetection = {
      */
     detectCore: function (distance, forestMask) {
         var core = distance.gte(CONFIG.edgeWidth)
-            .And(forestMask.eq(1))
+            .and(forestMask.eq(1))
             .rename('core');
         return core;
     }
@@ -181,8 +181,8 @@ var EdgeDetection = {
     // To be implemented in Week 2
     detectEdge: function (distance, forestMask, core) {
         var edge = distance.lt(CONFIG.edgeWidth)
-            .And(forestMask.eq(1))
-            .And(core.Not())
+            .and(forestMask.eq(1))
+            .and(core.not())
             .rename('edge');
         return edge;
     }
@@ -222,7 +222,7 @@ var SimplifiedMSPA = {
 
         // Simplified output (not full MSPA yet)
         var classification = ee.Image(0)
-            .where(forestMask.eq(1).And(core.Not()).And(edge), CONFIG.CLASS_IDS.EDGE)
+            .where(forestMask.eq(1).and(core.not()).and(edge), CONFIG.CLASS_IDS.EDGE)
             .where(core, CONFIG.CLASS_IDS.CORE)
             .rename('mspa_simplified');
 
