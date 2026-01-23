@@ -15,26 +15,28 @@
 // ============================================================
 
 var CONFIG = {
-    // MSPA Parameters (JRC defaults)
-    edgeWidth: 100,           // meters (distance threshold for core)
+    // MSPA Parameters (confirmed by Prof. Seth - Jan 18 email)
+    edgeWidth: 100,           // meters (default)
+    edgeWidthSensitivity: 50, // meters (sensitivity check)
     connectivity: 8,          // 8-connected (forest standard)
     resolution: 30,           // meters
 
     // Forest class definitions (IndiaSAT schema)
-    // UPDATE THESE after confirming with maintainers
+    // Confirmed: Build as SEPARATE LAYER with finer structural labels
     forestClasses: [3, 4],    // Deciduous, Evergreen (natural forest only)
     plantationClasses: [8],   // Excluded by design
 
-    // MSPA Class IDs
+    // Minimal MSPA Classes (Phase 1 - confirmed scope)
+    // Core, Edge, Islet, Bridge first; expand later
     CLASS_IDS: {
         NON_FOREST: 0,
         CORE: 1,
         ISLET: 2,
-        PERFORATION: 3,
+        PERFORATION: 3,  // Phase 2
         EDGE: 4,
-        LOOP: 5,
+        LOOP: 5,         // Phase 2
         BRIDGE: 6,
-        BRANCH: 7
+        BRANCH: 7        // Phase 2
     },
 
     // Visualization palette
