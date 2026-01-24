@@ -265,7 +265,7 @@ var IsletDetection = {
     detectIslets: function (forestMask, core) {
         // Identify individual forest patches
         var forestPatches = forestMask.connectedComponents({
-            kernel: ee.Kernel.plus(1),
+            connectedness: ee.Kernel.plus(1),
             maxSize: 256
         });
 
