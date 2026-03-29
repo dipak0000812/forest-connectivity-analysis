@@ -1,460 +1,412 @@
-/*
- * MSPA Forest Connectivity Analysis - GEE Implementation
- * Issue #228: Structural Connectivity of Forests (30m)
- * 
- * This is the PRIMARY implementation (GEE-first).
- * Python backend is for validation only.
- * 
- * Data Source: IndiaSAT LULC assets on CoRE Stack GEE
- * Resolution: 30m
- * Classes: 7 (Core, Islet, Perforation, Edge, Loop, Bridge, Branch)
- */
+// =============================================================================
+// MSPA Forest Structural Connectivity — CoRE Stack
+// Issue #228 | IndiaSAT LULC v4 2023-2024 | 30m resolution
+// Classes: 1=Islet, 2=Edge, 3=Perforation, 4=Core, 5=Bridge*, 6=Branch*
+// (* Bridge/Branch = Phase 3, stubs present)
+//
+// FIXED vs previous version:
+//   - forestClasses: [6] (was wrongly [3,4] = deciduous/evergreen, NOT trees)
+//   - Export blocks: uncommented and wired up
+//   - Single-band output confirmed (class codes 1–6)
+//   - Edge width: 100m = 3px at 30m (aligned with Vogt et al. default)
+//   - Perforation: connected-component internal background detection
+//
+// Author: Dipak Dhangar | C4GT Contributor | CoRE Stack Issue #228
+// =============================================================================
 
-// ============================================================
-// CONFIGURATION
-// ============================================================
 
+// -----------------------------------------------------------------------------
+// 0. CONFIGURATION
+// -----------------------------------------------------------------------------
 var CONFIG = {
-    // MSPA Parameters (confirmed by Prof. Seth - Jan 18 email)
-    edgeWidth: 100,           // meters (default)
-    edgeWidthSensitivity: 50, // meters (sensitivity check)
-    connectivity: 8,          // 8-connected (forest standard)
-    resolution: 30,           // meters
+    // ---- Data ----
+    lulcAsset: 'projects/corestack-datasets/assets/datasets/LULC_v3_river_basin/pan_india_lulc_v3_2023_2024',
+    lulcBand: 'predicted_label',
 
-    // Forest class definitions (IndiaSAT schema)
-    // Confirmed: Build as SEPARATE LAYER with finer structural labels
-    forestClasses: [3, 4],    // Deciduous, Evergreen (natural forest only)
-    plantationClasses: [8],   // Excluded by design
+    // CRITICAL FIX: Class 6 = 'Trees' in IndiaSAT v4 legend
+    // Legend: {0:Background, 1:Built up, 2:Kharif water, 3:Kharif+rabi water,
+    //  4:Kharif+rabi+zaid water, 5:Crops, 6:Trees, 7:Barren land,
+    //  8:Single Kharif, 9:Single Non-Kharif, 10:Double Crop,
+    //  11:Triple/Annual/Perennial Crop, 12:Shrubs and Scrubs}
+    forestClass: 6,
 
-    // Minimal MSPA Classes (Phase 1 - confirmed scope)
-    // Core, Edge, Islet, Bridge first; expand later
-    CLASS_IDS: {
-        NON_FOREST: 0,
-        CORE: 1,
-        ISLET: 2,
-        PERFORATION: 3,  // Phase 2
-        EDGE: 4,
-        LOOP: 5,         // Phase 2
-        BRIDGE: 6,
-        BRANCH: 7        // Phase 2
-    },
+    // ---- MSPA Parameters (Vogt et al. default) ----
+    edgeWidth_m: 100,   // 100m edge width
+    edgeWidth_px: 3,     // 100m / 30m ≈ 3 pixels
+    isletMaxArea_ha: 1,     // patches < 1 ha = Islet
+    connectivity8: true,  // 8-connected (standard MSPA)
 
-    // Visualization palette
-    palette: {
-        core: '006400',        // Dark green
-        islet: 'FFD700',       // Gold
-        perforation: '8B4513', // Brown
-        edge: '90EE90',        // Light green
-        loop: '00CED1',        // Dark cyan
-        bridge: 'FF0000',      // Red (critical corridors)
-        branch: 'FFA500'       // Orange
-    }
+    // ---- Test AOI: Kanke, Ranchi (Jharkhand) ----
+    // Replace with MWS FeatureCollection for production runs
+    testLon: 85.3195,
+    testLat: 23.4201,
+    bufferM: 20000,       // 20km radius test area
+    zoom: 11,
+
+    // ---- Export ----
+    // Replace with your GEE project asset path
+    exportAssetBase: 'projects/corestack-datasets/assets/forest_connectivity/',
+    exportScale: 30,
+    exportMaxPx: 1e10,
 };
 
-// ============================================================
-// DATA ACCESS (IndiaSAT LULC Assets)
-// ============================================================
 
-/**
- * Load IndiaSAT LULC from CoRE Stack GEE assets
- * 
- * NOTE: Confirm exact asset path with maintainers during Friday call.
- * These are placeholder paths based on CoRE Stack conventions.
- */
-var DataAccess = {
-
-    /**
-     * Get LULC image for a region and year
-     * @param {ee.Geometry} aoi - Area of Interest
-     * @param {number} year - Year of data
-     * @return {ee.Image} LULC raster
-     */
-    getLULC: function (aoi, year) {
-        // Option 1: Try ImageCollection (if time-series available)
-        // var lulc = ee.ImageCollection('projects/core-stack/assets/IndiaSAT/LULC')
-        //   .filterBounds(aoi)
-        //   .filterDate(year + '-01-01', year + '-12-31')
-        //   .mosaic();
-
-        // Option 2: Single Image asset per year
-        // var lulc = ee.Image('projects/core-stack/assets/IndiaSAT/LULC_30m_' + year);
-
-        // Option 3: Use ESRI Land Cover (publicly available, for testing)
-        // This is a FALLBACK if IndiaSAT access isn't confirmed
-        var esri = ee.ImageCollection('projects/sat-io/open-datasets/landcover/ESRI_Global-LULC_10m_TS')
-            .filterDate(year + '-01-01', year + '-12-31')
-            .mosaic()
-            .clip(aoi);
-
-        // ESRI classes: 2 = Trees
-        // Remap to match our schema for testing
-        var lulc = esri.remap([2], [3], 0).rename('lulc');
-
-        print('WARNING: Using ESRI Land Cover as fallback. Confirm IndiaSAT path.');
-        return lulc;
-    },
-
-    /**
-     * Get AoI/MWS boundaries from Dataset API
-     * NOTE: For now, define manually. Later integrate with API.
-     */
-    getAoI: function (name) {
-        // Example: Kanke tehsil, Ranchi, Jharkhand
-        var kanke = ee.Geometry.Rectangle([85.25, 23.35, 85.45, 23.55]);
-        return kanke;
-    }
-};
-
-// ============================================================
-// FOREST MASK (Natural Forest Only)
-// ============================================================
-
-/**
- * Create binary forest mask from LULC
- * CRITICAL: Excludes plantations by design
- */
-var ForestMask = {
-
-    /**
-     * Extract natural forest pixels
-     * @param {ee.Image} lulc - LULC raster
-     * @return {ee.Image} Binary mask (1=forest, 0=other)
-     */
-    create: function (lulc) {
-        var mask = lulc.remap(
-            CONFIG.forestClasses,
-            ee.List.repeat(1, CONFIG.forestClasses.length),
-            0
-        ).rename('forest_mask');
-
-        return mask;
-    }
-};
-
-// ============================================================
-// MSPA CORE DETECTION
-// ============================================================
-
-/**
- * MSPA Step 1: Detect Core forest areas
- * Core = forest pixels with distance >= edgeWidth from any edge
- */
-var CoreDetection = {
-
-    /**
-     * Compute distance from forest edge
-     * @param {ee.Image} forestMask - Binary forest mask
-     * @return {ee.Image} Distance raster in meters
-     */
-    computeDistance: function (forestMask) {
-        // fastDistanceTransform computes distance to nearest 0 (non-forest)
-        // Result is in pixels, multiply by resolution for meters
-        var distancePixels = forestMask.fastDistanceTransform({
-            neighborhood: 256,
-            units: 'pixels',
-            metric: 'squared_euclidean'
-        }).sqrt();
-
-        var distanceMeters = distancePixels.multiply(CONFIG.resolution).rename('distance_m');
-        return distanceMeters;
-    },
-
-    /**
-     * Classify core areas
-     * @param {ee.Image} distance - Distance raster in meters
-     * @param {ee.Image} forestMask - Binary forest mask
-     * @return {ee.Image} Core mask (1=core, 0=other)
-     */
-    detectCore: function (distance, forestMask) {
-        var core = distance.gte(CONFIG.edgeWidth)
-            .and(forestMask.eq(1))
-            .rename('core');
-        return core;
-    }
-};
-
-// ============================================================
-// MSPA BACKGROUND CLASSIFICATION (Holes vs External)
-// ============================================================
-
-var BackgroundClassification = {
-
-    /**
-     * classify background into Internal (Holes) and External
-     * @param {ee.Image} forestMask
-     * @return {Dictionary} {holes: ee.Image, external: ee.Image}
-     */
-    classify: function (forestMask) {
-        var background = forestMask.not();
-
-        // Use connectedPixelCount to distinguish small holes from large external background
-        // Threshold: ~50 hectares (roughly 550 pixels at 30m resolution)
-        // If > 550 pixels, assume it's connected to the outside (External)
-        // If <= 550 pixels, it's an internal hole
-        var maxSize = 550;
-        var connectedPixels = background.connectedPixelCount({
-            maxSize: maxSize,
-            eightConnected: true
-        });
-
-        // Holes = background patches smaller than threshold
-        var holes = background.and(connectedPixels.lt(maxSize)).rename('holes');
-
-        // External = background patches larger than threshold (likely connected to boundary)
-        var external = background.and(connectedPixels.gte(maxSize)).rename('external');
-
-        return { holes: holes, external: external };
-    }
-};
-
-// ============================================================
-// MSPA EDGE & PERFORATION
-// ============================================================
-
-var EdgeDetection = {
-
-    /**
-     * Detect Edge (External) and Perforation (Internal)
-     * @param {ee.Image} forestMask
-     * @param {ee.Image} core
-     * @param {Object} backgroundLayers - {holes, external}
-     */
-    detect: function (forestMask, core, backgroundLayers) {
-        // Distance to External Background
-        var distExternal = backgroundLayers.external
-            .fastDistanceTransform({ neighborhood: 256, units: 'pixels', metric: 'squared_euclidean' })
-            .sqrt()
-            .multiply(CONFIG.resolution);
-
-        // Distance to Internal Holes
-        var distHoles = backgroundLayers.holes
-            .fastDistanceTransform({ neighborhood: 256, units: 'pixels', metric: 'squared_euclidean' })
-            .sqrt()
-            .multiply(CONFIG.resolution);
-
-        // Potential Edge pixels (Forest, Non-Core, within distance of External)
-        var edgeCandidate = forestMask.eq(1)
-            .and(core.not())
-            .and(distExternal.lt(CONFIG.edgeWidth));
-
-        // Potential Perforation pixels (Forest, Non-Core, within distance of Hole)
-        var perfCandidate = forestMask.eq(1)
-            .and(core.not())
-            .and(distHoles.lt(CONFIG.edgeWidth));
-
-        // Priority: Edge > Perforation
-        // If pixel is close to both, it is Edge (External interface dominates)
-        var edge = edgeCandidate.rename('edge');
-        var perforation = perfCandidate.and(edge.not()).rename('perforation');
-
-        return { edge: edge, perforation: perforation };
-    }
-};
-
-// ============================================================
-// MSPA ISLET DETECTION
-// ============================================================
-
-var IsletDetection = {
-
-    /**
-     * Detect Islets (Forest patches with NO core)
-     * @param {ee.Image} forestMask
-     * @param {ee.Image} core
-     */
-    detectIslets: function (forestMask, core) {
-        // Identify individual forest patches
-        var forestPatches = forestMask.connectedComponents({
-            connectedness: ee.Kernel.plus(1),
-            maxSize: 256
-        });
-
-        // Check if each patch contains ANY Class 1 (Core) pixels
-        // max() reducer: if patch has core (1), result is 1. If not (0), result is 0.
-        var patchHasCore = core.reduceConnectedComponents({
-            reducer: ee.Reducer.max(),
-            labelBand: forestPatches
-        });
-
-        // Islet = Forest Patch AND NOT HasCore
-        var islet = forestMask.eq(1)
-            .and(patchHasCore.not())
-            .rename('islet');
-
-        return islet;
-    }
-};
-
-// ============================================================
-// MSPA SKELETON & CONNECTIVITY (Placeholder for Week 3)
-// ============================================================
-
-var SkeletonAnalysis = {
-    // To be implemented in Week 3
-    // Bridge, Branch, Loop detection via morphological thinning
-};
-
-// ============================================================
-// 4-CLASS OUTPUT (Week 2 Classification)
-// ============================================================
-
-var MSPAClassification = {
-
-    classify: function (forestMask, core, edgeLayer, perfLayer, isletLayer) {
-        // Initialize with 0
-        var mspa = ee.Image(0);
-
-        // Layer hierarchy (order matters for overwriting, though classes should be mutually exclusive)
-        // 1. Core
-        // 2. Islet
-        // 3. Edge
-        // 4. Perforation
-
-        mspa = mspa
-            .where(forestMask.eq(1), CONFIG.CLASS_IDS.CORE) // Default forest to Core (will be masked by Islet etc? No, logic separation better)
-
-        // Reset and build up
-        mspa = ee.Image(0)
-            .where(forestMask.eq(1).and(core.not()), 0) // Non-core forest placeholder?
-
-        // Strict assignment
-        mspa = mspa.where(isletLayer, CONFIG.CLASS_IDS.ISLET);
-        mspa = mspa.where(perfLayer, CONFIG.CLASS_IDS.PERFORATION);
-        mspa = mspa.where(edgeLayer, CONFIG.CLASS_IDS.EDGE);
-        mspa = mspa.where(core, CONFIG.CLASS_IDS.CORE);
-
-        // Final mask
-        mspa = mspa.updateMask(forestMask);
-
-        return mspa.rename('mspa_class');
-    }
-};
-
-// ============================================================
-// STATISTICS
-// ============================================================
-
-var Statistics = {
-
-    compute: function (classification, aoi) {
-        var pixelArea = CONFIG.resolution * CONFIG.resolution; // 900 m²
-
-        var stats = classification.reduceRegion({
-            reducer: ee.Reducer.frequencyHistogram(),
-            geometry: aoi,
-            scale: CONFIG.resolution,
-            maxPixels: 1e13
-        });
-
-        return stats;
-    }
-};
-
-// ============================================================
-// VISUALIZATION
-// ============================================================
-
-var Visualization = {
-
-    palette: [
-        '000000',  // 0 - Non-forest (black)
-        CONFIG.palette.core,        // 1 - Core
-        CONFIG.palette.islet,       // 2 - Islet
-        CONFIG.palette.perforation, // 3 - Perforation
-        CONFIG.palette.edge,        // 4 - Edge
-        CONFIG.palette.loop,        // 5 - Loop
-        CONFIG.palette.bridge,      // 6 - Bridge
-        CONFIG.palette.branch       // 7 - Branch
-    ],
-
-    addLayers: function (lulc, forestMask, distance, core, classification, aoi) {
-        Map.centerObject(aoi, 11);
-        Map.addLayer(lulc, { min: 0, max: 10, palette: ['white', 'green', 'blue'] }, 'LULC', false);
-        Map.addLayer(forestMask, { min: 0, max: 1, palette: ['white', 'darkgreen'] }, 'Forest Mask');
-        Map.addLayer(distance, { min: 0, max: 500, palette: ['red', 'yellow', 'green'] }, 'Distance from Edge', false);
-        Map.addLayer(core, { min: 0, max: 1, palette: ['white', CONFIG.palette.core] }, 'Core Forest');
-        Map.addLayer(classification, { min: 0, max: 7, palette: this.palette }, 'MSPA Classification');
-    }
-};
-
-// ============================================================
-// MAIN EXECUTION
-// ============================================================
-
-// Define Area of Interest (Kanke, Ranchi, Jharkhand)
-var aoi = DataAccess.getAoI('Kanke');
-var year = 2024;
-
-// Step 1: Load LULC data
-var lulc = DataAccess.getLULC(aoi, year);
-print('LULC loaded:', lulc);
-
-// Step 2: Create forest mask (natural forest only)
-var forestMask = ForestMask.create(lulc);
-print('Forest mask created');
-
-// Step 3.1: Background Classification (Holes vs External) (Part 2)
-var backgroundLayers = BackgroundClassification.classify(forestMask);
-print('Background classified:', backgroundLayers);
-
-// Step 3.2: Compute distance from edge
-var distance = CoreDetection.computeDistance(forestMask);
-print('Distance transform computed');
-
-// Step 4: Detect Core areas
-var core = CoreDetection.detectCore(distance, forestMask);
-print('Core areas detected');
-
-// Step 5: Detect Islets (Part 2)
-var islet = IsletDetection.detectIslets(forestMask, core);
-print('Islets detected');
-
-// Step 6: Detect Edge & Perforation (Part 2)
-var boundaries = EdgeDetection.detect(forestMask, core, backgroundLayers);
-print('Edge & Perforation detected');
-
-// Step 7: Combine into MSPA Classification (Part 2)
-var classification = MSPAClassification.classify(
-    forestMask,
-    core,
-    boundaries.edge,
-    boundaries.perforation,
-    islet
-);
-print('Classification complete (4-class)');
-
-// Step 8: Compute statistics
-var stats = Statistics.compute(classification, aoi);
-print('Statistics:', stats);
-
-// Step 9: Visualize
-Visualization.addLayers(
-    lulc,
-    forestMask,
-    distance,
-    core,
-    classification,
-    aoi
-);
-// Bonus: visualize Holes separately for debugging
-Map.addLayer(backgroundLayers.holes, { palette: ['red'] }, 'Holes (Internal Background)', false);
-Map.addLayer(boundaries.perforation, { palette: [CONFIG.palette.perforation] }, 'Perforation', false);
-
-// ============================================================
-// EXPORTS (For Asset Publishing - Week 4)
-// ============================================================
-
-/*
-Export.image.toAsset({
-  image: classification,
-  description: 'MSPA_Classification_Kanke_2024',
-  assetId: 'projects/core-stack/assets/MSPA/Jharkhand/Ranchi/Kanke/MSPA_30m_2024',
-  region: aoi,
-  scale: CONFIG.resolution,
-  maxPixels: 1e13
+// -----------------------------------------------------------------------------
+// 1. AOI — use MWS FeatureCollection for production; point buffer for test
+// -----------------------------------------------------------------------------
+var aoi = ee.Geometry.Point([CONFIG.testLon, CONFIG.testLat])
+    .buffer(CONFIG.bufferM)
+    .bounds();
+
+// For production with MWS boundaries, replace above with:
+// var aoi = ee.FeatureCollection(
+//   'projects/corestack-datasets/assets/datasets/India_mws_UID_Merged'
+// ).filter(ee.Filter.eq('state', 'Jharkhand'))
+//  .filter(ee.Filter.eq('district', 'Ranchi'))
+//  .geometry();
+
+
+// -----------------------------------------------------------------------------
+// 2. LOAD LULC AND EXTRACT TREE MASK
+// -----------------------------------------------------------------------------
+var lulc = ee.Image(CONFIG.lulcAsset)
+    .select(CONFIG.lulcBand)
+    .clip(aoi);
+
+// Binary forest mask: 1 = Trees (class 6), 0 = everything else
+// This explicitly excludes plantations (class 11), crops (5), shrubs (12)
+var forestMask = lulc.eq(CONFIG.forestClass)
+    .rename('forest')
+    .uint8();
+
+// Verify: print pixel count to confirm class 6 pixels exist in AOI
+var forestCount = forestMask.reduceRegion({
+    reducer: ee.Reducer.sum(),
+    geometry: aoi,
+    scale: 30,
+    maxPixels: 1e9
 });
-*/
+print('Forest pixel count (class 6):', forestCount);
 
-print('=== MSPA Analysis Complete ===');
-print('Week 1 Demo: Forest Mask + Core Detection');
-print('Next: Edge, Perforation, Islet (Week 2)');
+
+// -----------------------------------------------------------------------------
+// 3. PATCH SIZE — connected pixel count per forest patch (8-connected)
+// Used for Islet detection and area statistics
+// -----------------------------------------------------------------------------
+var patchSize_px = forestMask.connectedPixelCount({
+    maxSize: 1024,
+    eightConnected: true
+});
+
+// Patch area in hectares
+var patchSize_ha = patchSize_px.multiply(30 * 30).divide(10000);
+
+
+// -----------------------------------------------------------------------------
+// 4. DISTANCE TO EDGE
+// Per-pixel Euclidean distance (meters) from each forest pixel
+// to the nearest non-forest pixel.
+// GEE's fastDistanceTransform returns SQUARED distance in pixels.
+// -----------------------------------------------------------------------------
+var distToEdge_m = forestMask
+    .not()                                      // non-forest = foreground
+    .fastDistanceTransform(256, 'pixels')       // squared pixel distance
+    .sqrt()                                     // → pixel distance
+    .multiply(30)                               // → meters
+    .updateMask(forestMask)                     // forest pixels only
+    .rename('dist_to_edge_m');
+
+
+// -----------------------------------------------------------------------------
+// 5. PERFORATION DETECTION
+// Perforations = non-forest pixels completely enclosed by forest
+// (internal holes, e.g. clearings inside a large forest patch)
+//
+// Method: connected components on non-forest.
+// Background pixels with count < maxSize that NEVER touch the AOI boundary
+// are internal → perforation.
+//
+// We approximate external background by checking if a non-forest component
+// is large (effectively unbounded = external matrix).
+// Internal holes are small isolated non-forest regions.
+// -----------------------------------------------------------------------------
+var nonForestMask = forestMask.not().selfMask();
+
+// Count connected non-forest pixels (8-connected)
+var bgPatchSize = nonForestMask.connectedPixelCount({
+    maxSize: 1024,
+    eightConnected: true
+});
+
+// Internal non-forest = connected background component that hit the maxSize
+// ceiling is external (large open matrix); those that are small and bounded
+// are internal perforations.
+// Threshold: < 1024 pixels AND small relative to landscape = internal
+var internalBgMask = bgPatchSize.lt(1024)
+    .and(nonForestMask)
+    .rename('internal_bg');
+
+// Perforation EDGE class = forest pixels adjacent to internal holes
+// (dilate internal holes by edgeWidth, intersect with forest)
+var perforationEdge = internalBgMask
+    .focal_max(CONFIG.edgeWidth_px, 'square', 'pixels')
+    .and(forestMask)
+    .rename('perf_edge');
+
+
+// -----------------------------------------------------------------------------
+// 6. MSPA CLASSIFICATION
+// Priority order (Vogt et al. 2009):
+//   Islet > Core > Perforation > Edge
+//   Bridge / Branch: Phase 3 (skeletonization — stubs below)
+//
+// Class codes (single band):
+//   1 = Islet        (isolated small patch, no core)
+//   2 = Edge         (external forest edge zone)
+//   3 = Perforation  (forest edge adjacent to internal hole)
+//   4 = Core         (interior forest, >= edgeWidth from any edge)
+//   5 = Bridge       (Phase 3 — stub, all zeros for now)
+//   6 = Branch       (Phase 3 — stub, all zeros for now)
+// -----------------------------------------------------------------------------
+
+// --- 6a. ISLET ---
+// Small forest patches with no core pixels
+// Threshold: < 1 ha (configurable)
+var isletThresh_px = CONFIG.isletMaxArea_ha * 10000 / (30 * 30); // ~11 px
+var isletMask = patchSize_px.lte(isletThresh_px)
+    .and(forestMask)
+    .rename('islet');
+
+// --- 6b. CORE ---
+// Forest pixels >= edgeWidth meters from ANY non-forest edge
+// AND not an islet
+var coreMask = distToEdge_m
+    .gte(CONFIG.edgeWidth_m)
+    .and(forestMask)
+    .and(isletMask.not())
+    .rename('core');
+
+// --- 6c. PERFORATION ---
+// Forest pixels adjacent to internal holes AND not core AND not islet
+var perfMask = perforationEdge
+    .and(coreMask.not())
+    .and(isletMask.not())
+    .rename('perforation');
+
+// --- 6d. EDGE ---
+// Remaining forest pixels (external edge zone)
+var edgeMask = forestMask
+    .and(coreMask.not())
+    .and(perfMask.not())
+    .and(isletMask.not())
+    .rename('edge');
+
+// --- 6e. BRIDGE (Phase 3 stub) ---
+// Narrow forest corridors connecting two separate core patches
+// Requires morphological skeleton — to be implemented
+var bridgeMask = ee.Image(0).clip(aoi).rename('bridge');
+
+// --- 6f. BRANCH (Phase 3 stub) ---
+// Dead-end forest connectors attached to core
+var branchMask = ee.Image(0).clip(aoi).rename('branch');
+
+
+// -----------------------------------------------------------------------------
+// 7. COMBINE INTO SINGLE-BAND MSPA RASTER
+// Confirmed format: single band, integer class codes 1–6
+// -----------------------------------------------------------------------------
+var mspaRaster = ee.Image(0)
+    .where(edgeMask, 2)
+    .where(perfMask, 3)
+    .where(coreMask, 4)
+    .where(isletMask, 1)
+    .where(bridgeMask.gt(0), 5)
+    .where(branchMask.gt(0), 6)
+    .updateMask(forestMask)
+    .rename('mspa_class')
+    .uint8()
+    .set({
+        'description': 'MSPA Forest Structural Connectivity',
+        'source_lulc': CONFIG.lulcAsset,
+        'tree_class': CONFIG.forestClass,
+        'edge_width_m': CONFIG.edgeWidth_m,
+        'resolution_m': 30,
+        'classes': '1=Islet,2=Edge,3=Perforation,4=Core,5=Bridge,6=Branch',
+        'date_computed': new Date().toISOString().split('T')[0],
+        'methodology': 'Vogt et al. 2009 MSPA via GEE fastDistanceTransform + connectedPixelCount',
+        'author': 'Dipak Dhangar | C4GT | CoRE Stack Issue #228'
+    });
+
+
+// -----------------------------------------------------------------------------
+// 8. VECTORIZATION
+// Convert MSPA raster to polygons with required attributes
+// per Issue #228 acceptance criteria
+// -----------------------------------------------------------------------------
+var mspaVectors = mspaRaster.reduceToVectors({
+    geometry: aoi,
+    scale: 30,
+    geometryType: 'polygon',
+    eightConnected: true,
+    labelProperty: 'mspa_class',
+    maxPixels: 1e10
+});
+
+// Add area (ha) and class label attributes to each polygon
+var classLabels = ee.Dictionary({
+    '1': 'Islet',
+    '2': 'Edge',
+    '3': 'Perforation',
+    '4': 'Core',
+    '5': 'Bridge',
+    '6': 'Branch'
+});
+
+mspaVectors = mspaVectors.map(function (feat) {
+    var classCode = ee.Number(feat.get('mspa_class')).int();
+    var areaHa = feat.geometry().area().divide(10000);
+    var label = classLabels.get(classCode.format('%d'));
+    return feat
+        .set('class_code', classCode)
+        .set('class_label', label)
+        .set('area_ha', areaHa)
+        .set('source_lulc', CONFIG.lulcAsset)
+        .set('tree_class', CONFIG.forestClass)
+        .set('edge_width_m', CONFIG.edgeWidth_m);
+});
+
+print('Vector feature count:', mspaVectors.size());
+
+
+// -----------------------------------------------------------------------------
+// 9. VISUALIZATION
+// -----------------------------------------------------------------------------
+var LULC_VIS = {
+    bands: [CONFIG.lulcBand],
+    min: 0, max: 12,
+    palette: ['000000', 'ff0000', '74ccf4', '1ca3ec', '0f5e9c',
+        'f1c232', '38761d', 'A9A9A9', 'BAD93E', 'f59d22',
+        'FF9371', 'b3561d', 'a9a9a9']
+};
+
+var MSPA_VIS = {
+    min: 1, max: 6,
+    palette: [
+        'FFA500',  // 1 Islet       — orange
+        '90EE90',  // 2 Edge        — light green
+        'FFFF00',  // 3 Perforation — yellow
+        '006400',  // 4 Core        — dark green
+        '0000FF',  // 5 Bridge      — blue (stub)
+        '800080'   // 6 Branch      — purple (stub)
+    ]
+};
+
+Map.setCenter(CONFIG.testLon, CONFIG.testLat, CONFIG.zoom);
+
+// Layer 1: Raw LULC
+Map.addLayer(lulc, LULC_VIS, '1. IndiaSAT LULC (all classes)', false);
+
+// Layer 2: Tree mask only — verify against satellite basemap
+Map.addLayer(
+    forestMask.selfMask(),
+    { palette: ['38761d'] },
+    '2. Tree Mask (class 6 only)'
+);
+
+// Layer 3: Distance to edge gradient
+Map.addLayer(
+    distToEdge_m,
+    { min: 0, max: 500, palette: ['red', 'yellow', 'darkgreen'] },
+    '3. Distance to Edge (m)', false
+);
+
+// Layer 4: MSPA Classification — PRIMARY OUTPUT
+Map.addLayer(mspaRaster, MSPA_VIS, '4. MSPA Classification ★', true);
+
+// Layer 5: Internal background (perforation holes) — validation aid
+Map.addLayer(
+    internalBgMask.selfMask(),
+    { palette: ['FF0000'] },
+    '5. Internal Holes (Perforation source)', false
+);
+
+
+// -----------------------------------------------------------------------------
+// 10. AREA STATISTICS — print to Console for validation report
+// -----------------------------------------------------------------------------
+var classNames = ['Islet', 'Edge', 'Perforation', 'Core'];
+var classCodes = [1, 2, 3, 4];
+
+classCodes.forEach(function (code, i) {
+    var areaM2 = mspaRaster.eq(code)
+        .multiply(ee.Image.pixelArea())
+        .reduceRegion({
+            reducer: ee.Reducer.sum(),
+            geometry: aoi,
+            scale: 30,
+            maxPixels: 1e9
+        });
+    print(classNames[i] + ' area (ha):',
+        ee.Number(areaM2.get('mspa_class')).divide(10000));
+});
+
+
+// -----------------------------------------------------------------------------
+// 11. EXPORTS — run from Tasks panel
+// FIXED: these were commented out in previous version — now active
+// -----------------------------------------------------------------------------
+
+// --- Raster export ---
+Export.image.toAsset({
+    image: mspaRaster,
+    description: 'MSPA_Kanke_2023_2024_raster',
+    assetId: CONFIG.exportAssetBase + 'mspa_kanke_2023_2024',
+    region: aoi,
+    scale: CONFIG.exportScale,
+    maxPixels: CONFIG.exportMaxPx,
+    pyramidingPolicy: { '.default': 'mode' }
+});
+
+// --- Vector export ---
+Export.table.toAsset({
+    collection: mspaVectors,
+    description: 'MSPA_Kanke_2023_2024_vectors',
+    assetId: CONFIG.exportAssetBase + 'mspa_kanke_2023_2024_vectors'
+});
+
+// --- Also export to Drive for sharing with mentors ---
+Export.image.toDrive({
+    image: mspaRaster,
+    description: 'MSPA_Kanke_2023_2024_raster_drive',
+    folder: 'CoRE_Stack_MSPA',
+    fileNamePrefix: 'mspa_kanke_2023_2024',
+    region: aoi,
+    scale: 30,
+    maxPixels: CONFIG.exportMaxPx,
+    fileFormat: 'GeoTIFF'
+});
+
+Export.table.toDrive({
+    collection: mspaVectors,
+    description: 'MSPA_Kanke_2023_2024_vectors_drive',
+    folder: 'CoRE_Stack_MSPA',
+    fileNamePrefix: 'mspa_kanke_2023_2024_vectors',
+    fileFormat: 'GeoJSON'
+});
+
+
+// =============================================================================
+// PHASE 3 NOTES — Bridge / Branch (next implementation step)
+// =============================================================================
+// Bridge and Branch require morphological skeletonization of non-core forest.
+// GEE approach:
+//   1. Extract non-core forest pixels (edge + perforation zone)
+//   2. Apply iterative thinning via focal_min / focal_max convolutions
+//      to approximate morphological skeleton
+//   3. Bridge = skeleton pixels that connect two distinct core patch labels
+//      (detect via connectedComponents on core, then check skeleton endpoints)
+//   4. Branch = skeleton pixels with only one core endpoint (dead-end)
+//
+// Reference: Vogt et al. 2009, Pattern Recognition Letters
+// https://www.sciencedirect.com/science/article/pii/S0167865508003267
+// =============================================================================
