@@ -1,5 +1,17 @@
 """
-Forest Connectivity Analysis
+DEPRECATED — Reference/validation implementation only.
+
+This module is NOT used in production. The primary MSPA implementation
+is gee/mspa_analyzer.js (Google Earth Engine JavaScript).
+
+This Python code uses scipy.ndimage.distance_transform_edt as a local
+reference to validate GEE fastDistanceTransform results.
+
+Class codes here do NOT match the GEE output — do not use for production.
+The GEE output uses: 1=Islet, 2=Edge, 3=Perforation, 4=Core.
+This file uses an older 3-class system: 1=Near-Edge, 2=Transition, 3=Core.
+
+Forest Connectivity Analysis (DEPRECATED)
 Core algorithms for computing structural connectivity
 """
 

@@ -1,5 +1,13 @@
 """
-Vectorization Module
+DEPRECATED — Reference/validation implementation only.
+
+This module is NOT used in production. The primary vectorisation is done
+in gee/mspa_analyzer.js via reduceToVectors() on Google Earth Engine.
+
+This Python code converts the old 3-class raster (Fragmented/Edge/Core)
+to polygons via rasterio. It does NOT handle the correct MSPA class codes.
+
+Vectorization Module (DEPRECATED)
 Converts connectivity raster to vector polygons
 """
 
