@@ -1,0 +1,61 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgis/postgis:15-3.3
+    environment:
+      POSTGRES_USER: corestack
+      POSTGRES_PASSWORD: corestack
+      POSTGRES_DB: corestack
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U corestack"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    build: 
+      context: .
+      dockerfile: docker/Dockerfile.api
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    command: celery -A src.forest_connectivity worker -l INFO
+    volumes:
+      - .:/app
+    env_file: .env
+    depends_on:
+      - redis
+      - db
+
+  beat:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    command: celery -A src.forest_connectivity beat -l INFO
+    volumes:
+      - .:/app
+    env_file: .env
+    depends_on:
+      - redis
+      - db
