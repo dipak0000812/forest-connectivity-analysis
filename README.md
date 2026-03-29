@@ -7,40 +7,60 @@
 
 **Morphological Spatial Pattern Analysis (MSPA)** implementation for forest structural connectivity at 30m resolution, built for Google Earth Engine (GEE).
 
-**Data Source**: IndiaSAT LULC assets on CoRE Stack GEE  
-**Resolution**: 30 meters  
-**Classes**: 7 (Core, Islet, Perforation, Edge, Loop, Bridge, Branch)
+- **Data Source**: IndiaSAT LULC v4 on CoRE Stack GEE
+- **Asset**: `projects/corestack-datasets/assets/datasets/LULC_v3_river_basin/pan_india_lulc_v3_2023_2024`
+- **Band**: `predicted_label`
+- **Tree Class**: 6 = "Trees" (explicitly excludes plantations, crops, shrubs, water, built-up)
+- **Resolution**: 30 meters
 
 ---
 
 ## MSPA Classes
 
-| Class | ID | Definition | Ecological Role |
-|-------|-----|------------|-----------------|
-| **Core** | 1 | Interior forest (>100m from edge) | Primary habitat reservoir |
-| **Islet** | 2 | Small isolated patches | Stepping stones |
-| **Perforation** | 3 | Edge around internal gaps | Interior fragmentation |
-| **Edge** | 4 | Forest adjacent to non-forest | Transition zone |
-| **Loop** | 5 | Connects core to itself | Local connectivity |
-| **Bridge** | 6 | Connects 2+ different cores | **Critical corridors** |
-| **Branch** | 7 | Dead-end from core | Potential corridors |
+| Code | Class | Colour | Description |
+|------|-------|--------|-------------|
+| 1 | **Islet** | Orange | Isolated forest patch <1ha, no interior core |
+| 2 | **Edge** | Light Green | Forest pixels within 100m of non-forest boundary |
+| 3 | **Perforation** | Yellow | Forest edge adjacent to internal clearings |
+| 4 | **Core** | Dark Green | Interior forest ≥100m from any edge |
+| 5 | **Bridge** | Blue | [Phase 3] Core-connecting corridor |
+| 6 | **Branch** | Purple | [Phase 3] Dead-end connector to core |
 
 ---
 
-## Quick Start (GEE Code Editor)
+## Running the GEE Script
 
-### 1. Open GEE Code Editor
-Go to: https://code.earthengine.google.com/
+1. Open [Google Earth Engine Code Editor](https://code.earthengine.google.com)
+2. Paste the contents of `gee/mspa_analyzer.js`
+3. Click **Run** — 4 layers will render on the map
+4. Click **Tasks** → Run `MSPA_Kanke_2023_2024_raster_drive` and `MSPA_Kanke_2023_2024_vectors_drive`
+5. Exported files appear in Google Drive folder: `CoRE_Stack_MSPA`
 
-### 2. Load the Script
-Copy contents of `gee/mspa_analyzer.js` into Code Editor.
+**Layer legend:**
+- Layer 1: IndiaSAT LULC (all classes)
+- Layer 2: Tree Mask (class 6 only) — verify against Satellite basemap
+- Layer 3: Distance to Edge gradient (red=near edge, green=far)
+- Layer 4: MSPA Classification ★ (primary output)
+- Layer 5: Internal holes (perforation source) — validation aid
 
-### 3. Run
-Click "Run" to visualize:
-- Forest Mask (natural forest only, plantations excluded)
-- Distance from Edge
-- Core Forest Areas
-- MSPA Classification
+---
+
+## Quick Start (Docker Deployment)
+
+The backend pipeline runs via Docker Compose:
+
+```bash
+cp .env.example .env
+# Edit .env and supply your GEE service account credentials
+docker-compose up -d --build
+```
+
+### Triggering an Analysis
+```bash
+curl -X POST http://localhost:8000/api/v1/forest-connectivity/ \
+  -H "Content-Type: application/json" \
+  -d '{"state": "Jharkhand", "district": "Ranchi", "block": "Kanke", "lulc_year": "2023_2024"}'
+```
 
 ---
 
@@ -48,18 +68,20 @@ Click "Run" to visualize:
 
 ```
 forest-connectivity-analysis/
-├── gee/                      # PRIMARY (GEE-first)
-│   ├── mspa_analyzer.js      # Main MSPA implementation
-│   ├── forest_mask.js        # Forest extraction module
-│   └── core_detection.js     # Core detection module
-├── src/                      # REFERENCE (Python validation)
-│   ├── connectivity.py       # Distance transform logic
-│   └── vectorization.py      # Raster to polygon conversion
-├── tests/                    # Unit tests
-│   ├── test_connectivity.py
-│   └── test_vectorization.py
-└── docs/
-    └── METHODOLOGY.md        # Algorithm documentation
+├── gee/
+│   └── mspa_analyzer.js       # PRIMARY GEE implementation ★
+├── docs/
+│   ├── METHODOLOGY.md          # Algorithm documentation
+│   ├── VALIDATION_REPORT.md    # Test results (Kanke AOI)
+│   └── API.md                  # REST API documentation
+├── src/
+│   ├── forest_connectivity/    # Django app (API, Celery tasks, GEE utils)
+│   ├── connectivity.py         # Python reference (validation only, DEPRECATED)
+│   └── vectorization.py        # Python reference (validation only, DEPRECATED)
+├── docker/                     # Dockerfiles
+├── monitoring/                 # Prometheus configuration
+├── tests/                      # Test suite via pytest
+└── requirements/               # Dependencies
 ```
 
 ---
@@ -67,19 +89,28 @@ forest-connectivity-analysis/
 ## Algorithm
 
 ### Step 1: Forest Mask
-Extract natural forest from IndiaSAT LULC (Classes 3, 4). Plantations excluded.
+Extract natural forest from IndiaSAT LULC (Class 6 = "Trees", band: `predicted_label`).
+Classes 3 and 4 in IndiaSAT v4 are water body classes — not forest.
+Plantations (class 11), crops (class 5), and shrubs (class 12) are excluded.
 
 ### Step 2: Distance Transform
-Compute Euclidean distance from each forest pixel to nearest non-forest.
+Compute Euclidean distance from each forest pixel to nearest non-forest using
+`fastDistanceTransform` (GEE). Result: distance in meters per pixel.
 
-### Step 3: Core Detection
-Core = forest pixels with distance ≥ EdgeWidth (100m).
+### Step 3: Perforation Detection
+Identify internal non-forest holes via connected component analysis.
+Forest pixels adjacent to internal holes are classified as Perforation.
 
-### Step 4: Skeleton Analysis
-Extract skeleton of non-core forest to detect bridges, branches, loops.
+### Step 4: MSPA Classification
+Assign each forest pixel to a structural class based on Vogt et al. 2009:
+- **Islet**: patches <1ha with no core
+- **Core**: ≥100m from any non-forest edge
+- **Perforation**: adjacent to internal clearing
+- **Edge**: residual forest (within 100m of external boundary)
 
-### Step 5: Classification
-Assign each pixel to one of 7 MSPA classes based on connectivity role.
+### Step 5: Bridge/Branch (Phase 3 — planned)
+Morphological skeletonization of non-core forest to detect corridors.
+See `gee/mspa_analyzer.js` lines 397–411 for planned approach.
 
 ---
 
@@ -87,7 +118,8 @@ Assign each pixel to one of 7 MSPA classes based on connectivity role.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| EdgeWidth | 100m | Distance threshold for Core detection |
+| Edge width | 100m (3px) | Distance threshold for Core detection |
+| Islet threshold | <1ha (<11px) | Maximum area for Islet classification |
 | Connectivity | 8-connected | Pixel connectivity rule |
 | Resolution | 30m | Pixel size (CoRE Stack standard) |
 
@@ -96,25 +128,26 @@ Assign each pixel to one of 7 MSPA classes based on connectivity role.
 ## Outputs
 
 ### GEE Assets
-- `MSPA_30m_{year}` - 7-class raster
-- `MSPA_Vectors_{year}` - Polygons with attributes
+- Single-band uint8 raster (class codes 1–6, band: `mspa_class`)
+- FeatureCollection vectors with attributes per polygon
 
 ### Attributes per Polygon
-- `mspa_class` (1-7)
-- `class_name` (Core, Bridge, etc.)
+- `class_code` (1–6)
+- `class_label` (Islet, Edge, Perforation, Core, Bridge, Branch)
 - `area_ha` (hectares)
+- `source_lulc` (asset path)
+- `edge_width_m` (100)
 
 ---
 
 ## Python Reference (Validation Only)
 
-Python code in `src/` is for **validation against GEE outputs**, not primary execution.
+Python code in `src/connectivity.py` and `src/vectorization.py` is for
+**local validation only** — it does NOT implement full MSPA. The primary
+implementation is `gee/mspa_analyzer.js`.
 
 ```bash
-# Install dependencies (optional, for validation)
 pip install -r requirements.txt
-
-# Run tests
 pytest tests/ -v
 ```
 
@@ -122,8 +155,10 @@ pytest tests/ -v
 
 ## References
 
+- Vogt, P. et al. (2009). Mapping spatial patterns with morphological image processing.
+  *Pattern Recognition Letters*, 30(4), 456–459.
+  https://www.sciencedirect.com/science/article/pii/S0167865508003267
 - Vogt, P., & Riitters, K. (2017). GuidosToolbox. *European Journal of Remote Sensing*.
-- Soille, P., & Vogt, P. (2009). Morphological segmentation. *Pattern Recognition Letters*.
 - JRC MSPA: https://forest.jrc.ec.europa.eu/en/activities/lpa/mspa/
 
 ---
