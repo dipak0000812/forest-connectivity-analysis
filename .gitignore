@@ -46,3 +46,21 @@ outputs/run_*/
 # ── OS ─────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+.env
+
+api.log
+
+celerybeat-schedule
+
+db.sqlite3
+
+outputs/
+
+api.log
+
+celerybeat-schedule
+
+db.sqlite3
+
+outputs/
