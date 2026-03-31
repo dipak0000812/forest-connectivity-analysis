@@ -44,17 +44,17 @@ Returns the current status of the pipeline (e.g. `pending`, `computing`, `export
 #### Response (200 OK):
 ```json
 {
-  "task_id": "8482d8c3-f046-4e0d-b0cd-a044ea7231ce",
+  "task_id": "7bfc33c7-58cc-4036-a19b-c3fae907c9a8",
   "status": "done",
-  "created_at": "2026-03-29T10:00:00Z",
-  "updated_at": "2026-03-29T10:30:00Z",
+  "created_at": "2026-03-30T16:17:11Z",
+  "updated_at": "2026-03-30T16:20:24Z",
   "assets": {
-    "raster": "projects/corestack-datasets/assets/mspa_raster_8482d8c3...",
-    "vector": "projects/corestack-datasets/assets/mspa_vector_8482d8c3..."
+    "raster": "projects/forest-485204/assets/mspa_raster_7bfc33c7...",
+    "vector": "projects/forest-485204/assets/mspa_vector_7bfc33c7..."
   },
   "geoserver_layers": {
-    "wms": "http://geoserver/wms/corestack?layers=mspa_raster_8482d8c3...",
-    "wfs": "http://geoserver/wfs/corestack?typeName=mspa_raster_8482d8c3..."
+    "wms": "http://localhost:8080/geoserver/corestack/wms?layers=mspa_raster_7bfc33c7...",
+    "wfs": "http://localhost:8080/geoserver/corestack/wfs?typeName=mspa_raster_7bfc33c7..."
   }
 }
 ```

@@ -40,7 +40,8 @@ def sync_raster_to_geoserver(asset_path: str, layer_name: str, workspace: str = 
             success=True
         )
     except Exception as e:
-        logger.error(f"Failed to create sync log: {e}")
+        logger.error(f"Failed to sumulate raster sync logic: {e}")
+        raise e
 
 def sync_vector_to_geoserver(asset_path: str, layer_name: str, workspace: str = None):
     """
@@ -63,4 +64,5 @@ def sync_vector_to_geoserver(asset_path: str, layer_name: str, workspace: str = 
             success=True
         )
     except Exception as e:
-        logger.error(f"Failed to create sync log: {e}")
+        logger.error(f"Failed to sumulate vector sync logic: {e}")
+        raise e

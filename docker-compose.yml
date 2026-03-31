@@ -24,7 +24,7 @@ services:
     build: 
       context: .
       dockerfile: docker/Dockerfile.api
-    command: python manage.py runserver 0.0.0.0:8000
+    entrypoint: /bin/sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
     volumes:
       - .:/app
     ports:
@@ -58,4 +58,14 @@ services:
     env_file: .env
     depends_on:
       - redis
+      - db
+
+  geoserver:
+    image: kartoza/geoserver:2.23.2
+    environment:
+      - GEOSERVER_ADMIN_USER=admin
+      - GEOSERVER_ADMIN_PASSWORD=geoserver
+    ports:
+      - "8080:8080"
+    depends_on:
       - db

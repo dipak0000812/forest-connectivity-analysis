@@ -143,12 +143,17 @@ def check_export_status(gee_task_id: str):
     return state, error_msg
 
 def make_asset_public(asset_path: str):
-    """Make a GEE asset publicly readable."""
+    """Make a GEE asset readable to the GeoServer service account."""
     ee_initialize()
     try:
-        acl = {"all_users_can_read": True}
+        sa_email = getattr(settings, 'GEOSERVER_SA_EMAIL', None)
+        if not sa_email:
+            logger.warning("GEOSERVER_SA_EMAIL not set, skipping ACL update.")
+            return False
+            
+        acl = {"users": [sa_email]}
         ee.data.setAssetAcl(asset_path, acl)
-        logger.info(f"Asset made public: {asset_path}")
+        logger.info(f"Asset access granted to {sa_email}: {asset_path}")
         return True
     except Exception as e:
         logger.warning(f"Could not set asset ACL (may need owner permissions): {e}")

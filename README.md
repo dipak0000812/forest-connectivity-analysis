@@ -56,8 +56,11 @@ docker-compose up -d --build
 ```
 
 ### Triggering an Analysis
+Ensure you have a valid CoRE Stack JWT token:
+
 ```bash
 curl -X POST http://localhost:8000/api/v1/forest-connectivity/ \
+  -H "Authorization: Bearer <YOUR_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"state": "Jharkhand", "district": "Ranchi", "block": "Kanke", "lulc_year": "2023_2024"}'
 ```

@@ -6,10 +6,12 @@ from rest_framework import status
 from django.utils.decorators import method_decorator
 # Use simple throttle mapping to drf limits
 from rest_framework.throttling import UserRateThrottle
+from rest_framework.permissions import IsAuthenticated
 from .models import PipelineRun
 from django.conf import settings
 from .serializers import ForestConnectivityRequestSerializer, PipelineRunSerializer
 from .tasks import compute_mspa_task
+from django.db import transaction
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +23,7 @@ class ForestConnectivityView(APIView):
     POST /api/v1/forest-connectivity/
     Trigger a new MSPA connectivity analysis.
     """
+    permission_classes = [IsAuthenticated]
     throttle_classes = [BurstRateThrottle]
 
     def post(self, request, *args, **kwargs):
@@ -30,29 +33,30 @@ class ForestConnectivityView(APIView):
 
         params = serializer.validated_data
         
-        # Idempotency Check
-        # Does a completed pipeline exactly matching these params exist?
-        existing_run = PipelineRun.objects.filter(
-            state='done',
-            parameters__state=params['state'],
-            parameters__district=params['district'],
-            parameters__block=params['block'],
-            parameters__lulc_year=params['lulc_year']
-        ).first()
+        with transaction.atomic():
+            # Idempotency Check
+            # Prevent race conditions with select_for_update()
+            # Does a pipeline exactly matching these params exist that didn't fail?
+            existing_run = PipelineRun.objects.select_for_update().filter(
+                parameters__state=params['state'],
+                parameters__district=params['district'],
+                parameters__block=params['block'],
+                parameters__lulc_year=params['lulc_year']
+            ).exclude(state='failed').first()
 
-        if existing_run:
-            logger.info(f"Idempotency hit - returning completed run ID {existing_run.id}")
-            return Response({
-                "task_id": str(existing_run.id),
-                "status_url": f"/api/v1/forest-connectivity/{existing_run.id}/",
-                "status": "completed",
-                "message": "Found existing execution for these parameters."
-            }, status=status.HTTP_200_OK)
+            if existing_run:
+                logger.info(f"Idempotency hit - returning run ID {existing_run.id}")
+                return Response({
+                    "task_id": str(existing_run.id),
+                    "status_url": f"/api/v1/forest-connectivity/{existing_run.id}/",
+                    "status": existing_run.state,
+                    "message": "Found existing execution for these parameters."
+                }, status=status.HTTP_200_OK)
 
-        # Create new Pipeline Run
-        # Remove notify_email from parameters dict so we don't index PII blindly
-        # though standard JSONb is fine, we just pass what's needed for analysis to the parameter blob.
-        run = PipelineRun.objects.create(parameters=params)
+            # Create new Pipeline Run
+            # Remove notify_email from parameters dict so we don't index PII blindly
+            # though standard JSONb is fine, we just pass what's needed for analysis to the parameter blob.
+            run = PipelineRun.objects.create(parameters=params)
         
         # Enqueue Task
         compute_mspa_task.delay(str(run.id))
@@ -68,6 +72,8 @@ class ForestConnectivityDetailView(APIView):
     GET /api/v1/forest-connectivity/<task_id>/
     Gets the state of a running analysis or the assets if completed.
     """
+    permission_classes = [IsAuthenticated]
+    
     def get(self, request, task_id, *args, **kwargs):
         run = get_object_or_404(PipelineRun, id=task_id)
         serializer = PipelineRunSerializer(run)

@@ -69,13 +69,20 @@ def monitor_exports_task():
             
             make_asset_public(job.asset_path)
 
-            if job.export_type == 'raster':
-                run.asset_raster_path = job.asset_path
-                sync_raster_to_geoserver(job.asset_path, layer_name=f"mspa_raster_{run.id}")
-                run.geoserver_layer = f"mspa_raster_{run.id}"
-            else:
-                run.asset_vector_path = job.asset_path
-                sync_vector_to_geoserver(job.asset_path, layer_name=f"mspa_vector_{run.id}")
+            try:
+                if job.export_type == 'raster':
+                    run.asset_raster_path = job.asset_path
+                    sync_raster_to_geoserver(job.asset_path, layer_name=f"mspa_raster_{run.id}")
+                    run.geoserver_layer = f"mspa_raster_{run.id}"
+                else:
+                    run.asset_vector_path = job.asset_path
+                    sync_vector_to_geoserver(job.asset_path, layer_name=f"mspa_vector_{run.id}")
+            except Exception as e:
+                logger.error(f"GeoServer sync failed: {e}")
+                run.state = 'failed'
+                run.error_message = f"GeoServer sync failed: {e}"
+                run.save()
+                continue
 
             run.save()
 

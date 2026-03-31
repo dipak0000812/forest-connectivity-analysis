@@ -146,3 +146,5 @@ Three-level validation:
 2. **Quantitative:** Per-class area statistics from GEE Console
 3. **Cross-validation:** Comparison with JRC GuidosToolbox desktop app
    (planned — binary tree mask exported as GeoTIFF, same parameters applied)
+
+*Note: Initial end-to-end production validation was successfully completed on March 30, 2026, confirming the Celery-to-GEE-to-GeoServer synchronization pipeline operates continuously and reliably. Refer to `docs/VALIDATION_REPORT.md`.*
